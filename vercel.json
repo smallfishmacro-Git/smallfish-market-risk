@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/data",
+      "schedule": "45 21 * * 1-5"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    }
+  ]
+}
