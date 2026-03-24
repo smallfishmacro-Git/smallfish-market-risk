@@ -150,59 +150,170 @@ function SubTabs({ tabs, active, onChange }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// RegimeChart — SPX line colored by bull/bear regime
+// ZoomSlider — dual-thumb range slider for chart zooming
+// ═══════════════════════════════════════════════════════════════
+const sliderThumbCss = `
+input[type=range].zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 10px; height: 16px; background: #ff9f43; border: none;
+  border-radius: 2px; cursor: pointer; margin-top: -6px;
+}
+input[type=range].zoom-slider::-moz-range-thumb {
+  width: 10px; height: 16px; background: #ff9f43; border: none;
+  border-radius: 2px; cursor: pointer;
+}
+input[type=range].zoom-slider::-webkit-slider-runnable-track {
+  height: 4px; background: #1c1c24; border-radius: 2px;
+}
+input[type=range].zoom-slider::-moz-range-track {
+  height: 4px; background: #1c1c24; border-radius: 2px;
+}
+`;
+
+function ZoomSlider({ totalLength, zoomStart, zoomEnd, onChange }) {
+  if (totalLength < 10) return null;
+  const handleStart = (e) => {
+    const v = Number(e.target.value);
+    if (v < zoomEnd - 5) onChange(v, zoomEnd);
+  };
+  const handleEnd = (e) => {
+    const v = Number(e.target.value);
+    if (v > zoomStart + 5) onChange(zoomStart, v);
+  };
+  const pctL = (zoomStart / totalLength) * 100;
+  const pctR = (zoomEnd / totalLength) * 100;
+  return (
+    <div style={{ padding: "4px 8px 6px", position: "relative" }}>
+      <style>{sliderThumbCss}</style>
+      <div style={{ position: "relative", height: 16, marginLeft: 44, marginRight: 0 }}>
+        {/* Highlight bar */}
+        <div style={{
+          position: "absolute", top: 6, height: 4, borderRadius: 2,
+          left: `${pctL}%`, right: `${100 - pctR}%`,
+          background: `${T.orange}55`,
+        }} />
+        <input type="range" className="zoom-slider" min={0} max={totalLength} value={zoomStart}
+          onChange={handleStart}
+          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 16,
+            WebkitAppearance: "none", appearance: "none", background: "transparent",
+            pointerEvents: "none", zIndex: 2, margin: 0, padding: 0 }}
+        />
+        <input type="range" className="zoom-slider" min={0} max={totalLength} value={zoomEnd}
+          onChange={handleEnd}
+          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 16,
+            WebkitAppearance: "none", appearance: "none", background: "transparent",
+            pointerEvents: "none", zIndex: 3, margin: 0, padding: 0 }}
+        />
+        {/* Make thumbs clickable */}
+        <style>{`
+          input[type=range].zoom-slider { pointer-events: none; }
+          input[type=range].zoom-slider::-webkit-slider-thumb { pointer-events: auto; }
+          input[type=range].zoom-slider::-moz-range-thumb { pointer-events: auto; }
+        `}</style>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Helpers: convert dates array to timestamps for time-based x
+// ═══════════════════════════════════════════════════════════════
+function datesToTimestamps(dates) {
+  return dates.map((d) => new Date(d).getTime());
+}
+
+function makeTimeXScale(timestamps, padL, padR, W) {
+  const tMin = timestamps[0];
+  const tMax = timestamps[timestamps.length - 1];
+  const range = tMax - tMin || 1;
+  const plotW = W - padL - padR;
+  return (ts) => padL + ((ts - tMin) / range) * plotW;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RegimeChart — SPX line (white) with colored background bands
 // ═══════════════════════════════════════════════════════════════
 function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
   const [W, setW] = useState(700);
+  const [zoomStart, setZoomStart] = useState(0);
+  const [zoomEnd, setZoomEnd] = useState(dates.length);
+
+  useEffect(() => {
+    setZoomStart(0);
+    setZoomEnd(dates.length);
+  }, [dates.length]);
+
   useEffect(() => {
     if (!ref.current) return;
     const ro = new ResizeObserver((e) => { const w = e[0].contentRect.width; if (w > 0) setW(w); });
     ro.observe(ref.current); return () => ro.disconnect();
   }, []);
 
-  const n = dates.length;
-  if (n < 2) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
+  const totalN = dates.length;
+  if (totalN < 2) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
 
-  const hasInd = indicator != null;
+  // Apply zoom window
+  const zs = Math.max(0, Math.min(zoomStart, totalN - 2));
+  const ze = Math.max(zs + 2, Math.min(zoomEnd, totalN));
+  const zDates = dates.slice(zs, ze);
+  const zSpx = spx.slice(zs, ze);
+  const zTrend = trend.slice(zs, ze);
+  const zIndicator = indicator ? indicator.slice(zs, ze) : null;
+  const n = zDates.length;
+
+  const hasInd = zIndicator != null;
   const pad = { l: 52, r: 8, t: 8, mid: hasInd ? 14 : 0, b: 18 };
   const topH = hasInd ? Math.floor((height - pad.t - pad.mid - pad.b) * 0.6) : height - pad.t - pad.b;
   const botH = hasInd ? height - pad.t - topH - pad.mid - pad.b : 0;
-  const xS = (i) => pad.l + (i / (n - 1)) * (W - pad.l - pad.r);
+
+  // Time-based x scale
+  const timestamps = datesToTimestamps(zDates);
+  const xS = makeTimeXScale(timestamps, pad.l, pad.r, W);
 
   // SPX log scale
-  const spxV = spx.filter((v) => v > 0);
+  const spxV = zSpx.filter((v) => v > 0);
+  if (spxV.length < 1) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
   const logMin = Math.log(Math.min(...spxV)) - 0.04;
   const logMax = Math.log(Math.max(...spxV)) + 0.04;
   const ySpx = (v) => (!v || v <= 0) ? null : pad.t + topH - ((Math.log(v) - logMin) / (logMax - logMin)) * topH;
 
-  // Build colored segments
-  const buildSegments = () => {
-    const segs = [];
-    let curColor = trend[0] === 1 ? T.green : T.red;
-    let path = "";
-    for (let i = 0; i < n; i++) {
-      const y = ySpx(spx[i]);
-      if (y == null) continue;
-      const c = trend[i] === 1 ? T.green : T.red;
-      if (c !== curColor) {
-        if (path) segs.push({ path, color: curColor });
-        path = `M${xS(i).toFixed(1)},${y.toFixed(1)}`;
-        curColor = c;
-      } else {
-        path += (path ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`;
+  // Build background regime bands
+  const buildBands = () => {
+    const bands = [];
+    let startIdx = 0;
+    let curRegime = zTrend[0];
+    for (let i = 1; i <= n; i++) {
+      if (i === n || zTrend[i] !== curRegime) {
+        const x1 = xS(timestamps[startIdx]);
+        const x2 = i < n ? xS(timestamps[i]) : xS(timestamps[n - 1]);
+        bands.push({
+          x: x1, width: Math.max(0, x2 - x1),
+          color: curRegime === 1 ? T.green : T.red,
+        });
+        if (i < n) {
+          startIdx = i;
+          curRegime = zTrend[i];
+        }
       }
     }
-    if (path) segs.push({ path, color: curColor });
-    return segs;
+    return bands;
   };
-  const segments = buildSegments();
+  const bands = buildBands();
+
+  // Build single white price line
+  let pricePath = "";
+  for (let i = 0; i < n; i++) {
+    const y = ySpx(zSpx[i]);
+    if (y == null) continue;
+    pricePath += (pricePath ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+  }
 
   // Indicator bottom panel
   let indMin = 0, indMax = 100, yInd = () => null;
   if (hasInd) {
-    const iv = indicator.filter((v) => v != null && isFinite(v));
+    const iv = zIndicator.filter((v) => v != null && isFinite(v));
     indMin = Math.min(...iv); indMax = Math.max(...iv);
     const m = (indMax - indMin) * 0.05 || 1;
     indMin -= m; indMax += m;
@@ -211,9 +322,9 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
   let indPath = "";
   if (hasInd) {
     for (let i = 0; i < n; i++) {
-      const y = yInd(indicator[i]);
+      const y = yInd(zIndicator[i]);
       if (y == null) continue;
-      indPath += (indPath ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`;
+      indPath += (indPath ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
     }
   }
 
@@ -223,42 +334,58 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
   }));
   const dateLbls = [];
   const step = Math.max(1, Math.floor(n / 6));
-  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(i), label: new Date(dates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(timestamps[i]), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
 
   const handleMouse = (e) => {
     const r = ref.current?.getBoundingClientRect(); if (!r) return;
-    const idx = Math.round(((e.clientX - r.left - pad.l) / (W - pad.l - pad.r)) * (n - 1));
-    if (idx >= 0 && idx < n) setHover(idx);
+    const mouseX = e.clientX - r.left;
+    // Find closest data point by x position
+    let bestIdx = 0, bestDist = Infinity;
+    for (let i = 0; i < n; i++) {
+      const dist = Math.abs(xS(timestamps[i]) - mouseX);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+    setHover(bestIdx);
   };
-  const hx = hover != null ? xS(hover) : null;
+  const hx = hover != null ? xS(timestamps[hover]) : null;
 
   return (
-    <div ref={ref} style={{ position: "relative", width: "100%" }}
-      onMouseMove={handleMouse} onMouseLeave={() => setHover(null)}>
-      <svg width={W} height={height} style={{ display: "block" }}>
-        {spxTicks.map((l, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
-        {segments.map((s, i) => <path key={i} d={s.path} fill="none" stroke={s.color} strokeWidth={1.2} />)}
-        {hasInd && <line x1={pad.l} x2={W - pad.r} y1={pad.t + topH + pad.mid / 2} y2={pad.t + topH + pad.mid / 2} stroke={T.border} strokeWidth={0.5} />}
-        {hasInd && <path d={indPath} fill="none" stroke={T.orange} strokeWidth={1} />}
-        {hasInd && indLabel && <text x={pad.l + 4} y={pad.t + topH + pad.mid + 12} fill={T.orange} fontSize={8} fontFamily={T.font}>{indLabel}</text>}
-        {spxTicks.map((l, i) => <text key={i} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
-        <text x={pad.l + 4} y={pad.t + 12} fill={T.dim} fontSize={8} fontFamily={T.font}>S&P 500 (log)</text>
-        {dateLbls.map((l, i) => <text key={i} x={l.x} y={height - 2} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
-        {hover != null && <>
-          <line x1={hx} x2={hx} y1={pad.t} y2={height - pad.b} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
-          {ySpx(spx[hover]) != null && <circle cx={hx} cy={ySpx(spx[hover])} r={2.5} fill={trend[hover] === 1 ? T.green : T.red} stroke={T.bg} strokeWidth={1} />}
-        </>}
-      </svg>
-      {hover != null && (
-        <div style={{ position: "absolute", left: Math.min(hx + 10, W - 180), top: pad.t,
-          background: "rgba(10,10,12,0.94)", border: `1px solid ${T.borderBright}`,
-          padding: "5px 8px", pointerEvents: "none", zIndex: 10, fontFamily: T.font, fontSize: 9, lineHeight: 1.5 }}>
-          <div style={{ color: T.dim }}>{dates[hover]}</div>
-          <div style={{ color: T.bright }}>SPX: {spx[hover]?.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div>
-          <div style={{ color: trend[hover] === 1 ? T.green : T.red }}>{trend[hover] === 1 ? "BULL" : "BEAR"}</div>
-          {hasInd && indicator[hover] != null && <div style={{ color: T.orange }}>{indLabel}: {indicator[hover]?.toFixed(1)}</div>}
-        </div>
-      )}
+    <div>
+      <div ref={ref} style={{ position: "relative", width: "100%" }}
+        onMouseMove={handleMouse} onMouseLeave={() => setHover(null)}>
+        <svg width={W} height={height} style={{ display: "block" }}>
+          {/* Background regime bands */}
+          {bands.map((b, i) => (
+            <rect key={i} x={b.x} y={pad.t} width={b.width} height={topH}
+              fill={b.color} opacity={0.08} />
+          ))}
+          {spxTicks.map((l, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
+          {/* White price line */}
+          <path d={pricePath} fill="none" stroke={T.white} strokeWidth={1.2} />
+          {hasInd && <line x1={pad.l} x2={W - pad.r} y1={pad.t + topH + pad.mid / 2} y2={pad.t + topH + pad.mid / 2} stroke={T.border} strokeWidth={0.5} />}
+          {hasInd && <path d={indPath} fill="none" stroke={T.orange} strokeWidth={1} />}
+          {hasInd && indLabel && <text x={pad.l + 4} y={pad.t + topH + pad.mid + 12} fill={T.orange} fontSize={8} fontFamily={T.font}>{indLabel}</text>}
+          {spxTicks.map((l, i) => <text key={i} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
+          <text x={pad.l + 4} y={pad.t + 12} fill={T.dim} fontSize={8} fontFamily={T.font}>S&P 500 (log)</text>
+          {dateLbls.map((l, i) => <text key={i} x={l.x} y={height - 2} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
+          {hover != null && <>
+            <line x1={hx} x2={hx} y1={pad.t} y2={height - pad.b} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
+            {ySpx(zSpx[hover]) != null && <circle cx={hx} cy={ySpx(zSpx[hover])} r={2.5} fill={T.white} stroke={T.bg} strokeWidth={1} />}
+          </>}
+        </svg>
+        {hover != null && (
+          <div style={{ position: "absolute", left: Math.min(hx + 10, W - 180), top: pad.t,
+            background: "rgba(10,10,12,0.94)", border: `1px solid ${T.borderBright}`,
+            padding: "5px 8px", pointerEvents: "none", zIndex: 10, fontFamily: T.font, fontSize: 9, lineHeight: 1.5 }}>
+            <div style={{ color: T.dim }}>{zDates[hover]}</div>
+            <div style={{ color: T.bright }}>SPX: {zSpx[hover]?.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div>
+            <div style={{ color: zTrend[hover] === 1 ? T.green : T.red }}>{zTrend[hover] === 1 ? "BULL" : "BEAR"}</div>
+            {hasInd && zIndicator[hover] != null && <div style={{ color: T.orange }}>{indLabel}: {zIndicator[hover]?.toFixed(1)}</div>}
+          </div>
+        )}
+      </div>
+      <ZoomSlider totalLength={totalN} zoomStart={zoomStart} zoomEnd={zoomEnd}
+        onChange={(s, e) => { setZoomStart(s); setZoomEnd(e); }} />
     </div>
   );
 }
@@ -321,64 +448,171 @@ function IndicatorRow({ ind, index }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EquityCurveChart
+// EquityCurveChart — orange strategy + drawdown subplot
 // ═══════════════════════════════════════════════════════════════
-function EquityCurveChart({ dates, strategy, buyHold, height = 380 }) {
+function EquityCurveChart({ dates, strategy, buyHold, height = 480 }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
   const [W, setW] = useState(600);
+  const [zoomStart, setZoomStart] = useState(0);
+  const [zoomEnd, setZoomEnd] = useState(dates.length);
+
+  useEffect(() => {
+    setZoomStart(0);
+    setZoomEnd(dates.length);
+  }, [dates.length]);
+
   useEffect(() => {
     if (!ref.current) return;
     const ro = new ResizeObserver((e) => { const w = e[0].contentRect.width; if (w > 0) setW(w); });
     ro.observe(ref.current); return () => ro.disconnect();
   }, []);
 
-  const n = dates.length;
-  if (n < 2) return null;
-  const pad = { l: 52, r: 8, t: 12, b: 20 };
-  const H = height - pad.t - pad.b;
-  const xS = (i) => pad.l + (i / (n - 1)) * (W - pad.l - pad.r);
-  const allVals = [...strategy, ...buyHold].filter((v) => v != null && isFinite(v));
+  const totalN = dates.length;
+  if (totalN < 2) return null;
+
+  // Apply zoom
+  const zs = Math.max(0, Math.min(zoomStart, totalN - 2));
+  const ze = Math.max(zs + 2, Math.min(zoomEnd, totalN));
+  const zDates = dates.slice(zs, ze);
+  const zStrategy = strategy.slice(zs, ze);
+  const zBuyHold = buyHold.slice(zs, ze);
+  const n = zDates.length;
+
+  const pad = { l: 52, r: 8, t: 12, mid: 12, b: 20 };
+  const eqH = Math.floor((height - pad.t - pad.mid - pad.b) * 0.65);
+  const ddH = height - pad.t - eqH - pad.mid - pad.b;
+
+  // Time-based x
+  const timestamps = datesToTimestamps(zDates);
+  const xS = makeTimeXScale(timestamps, pad.l, pad.r, W);
+
+  // Equity y scale
+  const allVals = [...zStrategy, ...zBuyHold].filter((v) => v != null && isFinite(v));
   const mn = Math.min(...allVals) * 0.98, mx = Math.max(...allVals) * 1.02;
-  const yS = (v) => (v == null || !isFinite(v)) ? null : pad.t + H - ((v - mn) / (mx - mn)) * H;
+  const yS = (v) => (v == null || !isFinite(v)) ? null : pad.t + eqH - ((v - mn) / (mx - mn)) * eqH;
 
-  const buildPath = (vals) => { let p = ""; for (let i = 0; i < n; i++) { const y = yS(vals[i]); if (y == null) continue; p += (p ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`; } return p; };
-  const ticks = [mn, (mn + mx) / 2, mx].map((v) => ({ y: yS(v), label: v.toFixed(0) }));
-  const dateLbls = []; const step = Math.max(1, Math.floor(n / 6));
-  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(i), label: new Date(dates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+  // Compute drawdown arrays
+  const computeDD = (vals) => {
+    const dd = [];
+    let peak = 0;
+    for (const v of vals) {
+      if (v != null && v > peak) peak = v;
+      dd.push(peak > 0 ? (v - peak) / peak : 0);
+    }
+    return dd;
+  };
+  const stratDD = computeDD(zStrategy);
+  const bhDD = computeDD(zBuyHold);
 
-  const handleMouse = (e) => { const r = ref.current?.getBoundingClientRect(); if (!r) return; const idx = Math.round(((e.clientX - r.left - pad.l) / (W - pad.l - pad.r)) * (n - 1)); if (idx >= 0 && idx < n) setHover(idx); };
-  const hx = hover != null ? xS(hover) : null;
-  const stratReturn = strategy.length >= 2 ? (strategy[strategy.length - 1] / strategy[0] - 1) * 100 : 0;
-  const bhReturn = buyHold.length >= 2 ? (buyHold[buyHold.length - 1] / buyHold[0] - 1) * 100 : 0;
+  // Drawdown y scale
+  const allDD = [...stratDD, ...bhDD].filter((v) => v != null && isFinite(v));
+  const ddMin = Math.min(0, Math.min(...allDD)) * 1.05;
+  const ddMax = 0;
+  const ddTop = pad.t + eqH + pad.mid;
+  const yDD = (v) => (v == null || !isFinite(v)) ? null : ddTop + ddH - ((v - ddMin) / (ddMax - ddMin || 1)) * ddH;
+
+  const buildPath = (vals, yFn) => {
+    let p = "";
+    for (let i = 0; i < n; i++) {
+      const y = yFn(vals[i]);
+      if (y == null) continue;
+      p += (p ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+    }
+    return p;
+  };
+
+  // Build filled area path for drawdowns
+  const buildAreaPath = (vals, yFn) => {
+    let points = [];
+    for (let i = 0; i < n; i++) {
+      const y = yFn(vals[i]);
+      if (y == null) continue;
+      points.push({ x: xS(timestamps[i]), y });
+    }
+    if (points.length < 2) return "";
+    const baseline = yFn(0);
+    let p = `M${points[0].x.toFixed(1)},${baseline.toFixed(1)}`;
+    for (const pt of points) p += `L${pt.x.toFixed(1)},${pt.y.toFixed(1)}`;
+    p += `L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)}Z`;
+    return p;
+  };
+
+  const eqTicks = [mn, (mn + mx) / 2, mx].map((v) => ({ y: yS(v), label: v.toFixed(0) }));
+  const ddTicks = [ddMin, ddMin / 2, 0].map((v) => ({ y: yDD(v), label: `${(v * 100).toFixed(0)}%` }));
+
+  const dateLbls = [];
+  const step = Math.max(1, Math.floor(n / 6));
+  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(timestamps[i]), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+
+  const handleMouse = (e) => {
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    const mouseX = e.clientX - r.left;
+    let bestIdx = 0, bestDist = Infinity;
+    for (let i = 0; i < n; i++) {
+      const dist = Math.abs(xS(timestamps[i]) - mouseX);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+    setHover(bestIdx);
+  };
+  const hx = hover != null ? xS(timestamps[hover]) : null;
+
+  const stratReturn = zStrategy.length >= 2 ? (zStrategy[zStrategy.length - 1] / zStrategy[0] - 1) * 100 : 0;
+  const bhReturn = zBuyHold.length >= 2 ? (zBuyHold[zBuyHold.length - 1] / zBuyHold[0] - 1) * 100 : 0;
 
   return (
-    <div ref={ref} style={{ position: "relative", width: "100%" }} onMouseMove={handleMouse} onMouseLeave={() => setHover(null)}>
-      <div style={{ padding: "0 8px 2px", display: "flex", gap: 16, fontSize: 9, color: T.dim }}>
-        <span>— <span style={{ color: T.green }}>STRATEGY</span> {stratReturn >= 0 ? "+" : ""}{stratReturn.toFixed(1)}%</span>
-        <span>— <span style={{ color: T.dim }}>BUY & HOLD</span> {bhReturn >= 0 ? "+" : ""}{bhReturn.toFixed(1)}%</span>
-      </div>
-      <svg width={W} height={height} style={{ display: "block" }}>
-        {ticks.map((l, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
-        {yS(100) != null && <line x1={pad.l} x2={W - pad.r} y1={yS(100)} y2={yS(100)} stroke="rgba(255,255,255,0.08)" strokeDasharray="3,4" />}
-        <path d={buildPath(buyHold)} fill="none" stroke={T.dim} strokeWidth={1} opacity={0.5} />
-        <path d={buildPath(strategy)} fill="none" stroke={T.green} strokeWidth={1.2} />
-        {ticks.map((l, i) => <text key={i} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
-        {dateLbls.map((l, i) => <text key={i} x={l.x} y={height - 4} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
-        {hover != null && <>
-          <line x1={hx} x2={hx} y1={pad.t} y2={pad.t + H} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
-          {yS(strategy[hover]) != null && <circle cx={hx} cy={yS(strategy[hover])} r={2.5} fill={T.green} stroke={T.bg} strokeWidth={1} />}
-        </>}
-      </svg>
-      {hover != null && (
-        <div style={{ position: "absolute", left: Math.min(hx + 10, W - 180), top: pad.t,
-          background: "rgba(10,10,12,0.94)", border: `1px solid ${T.borderBright}`,
-          padding: "5px 8px", pointerEvents: "none", zIndex: 10, fontFamily: T.font, fontSize: 9, lineHeight: 1.5 }}>
-          <div style={{ color: T.dim }}>{dates[hover]}</div>
-          <div style={{ color: T.green }}>Strategy: {strategy[hover]?.toFixed(1)}</div>
-          <div style={{ color: T.text }}>Buy & Hold: {buyHold[hover]?.toFixed(1)}</div>
+    <div>
+      <div ref={ref} style={{ position: "relative", width: "100%" }} onMouseMove={handleMouse} onMouseLeave={() => setHover(null)}>
+        <div style={{ padding: "0 8px 2px", display: "flex", gap: 16, fontSize: 9, color: T.dim }}>
+          <span>— <span style={{ color: T.orange }}>STRATEGY</span> {stratReturn >= 0 ? "+" : ""}{stratReturn.toFixed(1)}%</span>
+          <span>— <span style={{ color: T.dim }}>BUY & HOLD</span> {bhReturn >= 0 ? "+" : ""}{bhReturn.toFixed(1)}%</span>
         </div>
-      )}
+        <svg width={W} height={height} style={{ display: "block" }}>
+          {/* Equity curve area */}
+          {eqTicks.map((l, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
+          {yS(100) != null && <line x1={pad.l} x2={W - pad.r} y1={yS(100)} y2={yS(100)} stroke="rgba(255,255,255,0.08)" strokeDasharray="3,4" />}
+          <path d={buildPath(zBuyHold, yS)} fill="none" stroke={T.dim} strokeWidth={1} opacity={0.5} />
+          <path d={buildPath(zStrategy, yS)} fill="none" stroke={T.orange} strokeWidth={1.4} />
+          {eqTicks.map((l, i) => <text key={i} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
+
+          {/* Separator */}
+          <line x1={pad.l} x2={W - pad.r} y1={pad.t + eqH + pad.mid / 2} y2={pad.t + eqH + pad.mid / 2} stroke={T.border} strokeWidth={0.5} />
+
+          {/* Drawdown subplot */}
+          <text x={pad.l + 4} y={ddTop + 10} fill={T.dim} fontSize={8} fontFamily={T.font}>DRAWDOWN</text>
+          {ddTicks.map((l, i) => <line key={`dd${i}`} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
+          <path d={buildAreaPath(bhDD, yDD)} fill={`${T.dim}15`} stroke="none" />
+          <path d={buildPath(bhDD, yDD)} fill="none" stroke={T.dim} strokeWidth={0.7} opacity={0.5} />
+          <path d={buildAreaPath(stratDD, yDD)} fill={`${T.orange}15`} stroke="none" />
+          <path d={buildPath(stratDD, yDD)} fill="none" stroke={T.orange} strokeWidth={0.9} />
+          {ddTicks.map((l, i) => <text key={`ddt${i}`} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
+
+          {/* Date labels */}
+          {dateLbls.map((l, i) => <text key={i} x={l.x} y={height - 4} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
+
+          {/* Hover */}
+          {hover != null && <>
+            <line x1={hx} x2={hx} y1={pad.t} y2={height - pad.b} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
+            {yS(zStrategy[hover]) != null && <circle cx={hx} cy={yS(zStrategy[hover])} r={2.5} fill={T.orange} stroke={T.bg} strokeWidth={1} />}
+            {yDD(stratDD[hover]) != null && <circle cx={hx} cy={yDD(stratDD[hover])} r={2} fill={T.orange} stroke={T.bg} strokeWidth={1} />}
+          </>}
+        </svg>
+        {hover != null && (
+          <div style={{ position: "absolute", left: Math.min(hx + 10, W - 200), top: pad.t,
+            background: "rgba(10,10,12,0.94)", border: `1px solid ${T.borderBright}`,
+            padding: "5px 8px", pointerEvents: "none", zIndex: 10, fontFamily: T.font, fontSize: 9, lineHeight: 1.5 }}>
+            <div style={{ color: T.dim }}>{zDates[hover]}</div>
+            <div style={{ color: T.orange }}>Strategy: {zStrategy[hover]?.toFixed(1)}</div>
+            <div style={{ color: T.text }}>Buy & Hold: {zBuyHold[hover]?.toFixed(1)}</div>
+            <div style={{ color: T.orange, borderTop: `1px solid ${T.border}`, marginTop: 2, paddingTop: 2 }}>
+              Strat DD: {(stratDD[hover] * 100).toFixed(1)}%
+            </div>
+            <div style={{ color: T.dim }}>B&H DD: {(bhDD[hover] * 100).toFixed(1)}%</div>
+          </div>
+        )}
+      </div>
+      <ZoomSlider totalLength={totalN} zoomStart={zoomStart} zoomEnd={zoomEnd}
+        onChange={(s, e) => { setZoomStart(s); setZoomEnd(e); }} />
     </div>
   );
 }
@@ -518,7 +752,7 @@ function CompositeSignalView({ data }) {
             <span style={{ color: T.orange, fontWeight: 600 }}>How to read this: </span>
             The Trend Health Model aggregates 18 indicators across macro, breadth, volatility, momentum, and sentiment.
             The composite score (0–100%) reflects the percentage of indicators in a bullish state.
-            Above 55% = <span style={{ color: T.green }}>BULL</span> regime (green line). Below = <span style={{ color: T.red }}>BEAR</span> regime (red line).
+            Above 55% = <span style={{ color: T.green }}>BULL</span> regime (green background). Below = <span style={{ color: T.red }}>BEAR</span> regime (red background).
           </InfoBox>
           <div style={{ background: T.bgPanel }}>
             {thmSliced && <RegimeChart dates={thmSliced.dates} spx={thmSliced.arrays[0]} trend={thmSliced.arrays[1]} indicator={thmSliced.arrays[2]} indLabel="Health Score %" height={380} />}
@@ -621,11 +855,11 @@ function BacktestView({ data }) {
           <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, padding: "8px 8px 0" }}>EQUITY CURVE</div>
           <InfoBox>
             <span style={{ color: T.orange, fontWeight: 600 }}>How to read this: </span>
-            The <span style={{ color: T.green }}>green line</span> shows the return of being long S&P 500 only during <span style={{ color: T.green }}>BULL</span> regimes and flat during <span style={{ color: T.red }}>BEAR</span> regimes.
-            The <span style={{ color: T.dim }}>grey line</span> is a simple buy-and-hold benchmark. Both start at 100.
+            The <span style={{ color: T.orange }}>orange line</span> shows the return of being long S&P 500 only during <span style={{ color: T.green }}>BULL</span> regimes and flat during <span style={{ color: T.red }}>BEAR</span> regimes.
+            The <span style={{ color: T.dim }}>grey line</span> is a simple buy-and-hold benchmark. Both start at 100. The drawdown subplot shows peak-to-trough declines.
           </InfoBox>
           <div style={{ background: T.bgPanel, flex: 1 }}>
-            <EquityCurveChart dates={bt.equity.dates} strategy={bt.equity.strategy} buyHold={bt.equity.buyHold} height={360} />
+            <EquityCurveChart dates={bt.equity.dates} strategy={bt.equity.strategy} buyHold={bt.equity.buyHold} height={460} />
           </div>
 
           {/* Trade log */}
