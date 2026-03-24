@@ -231,6 +231,38 @@ function makeTimeXScale(timestamps, padL, padR, W) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Align sparse indicator data to full daily SPX series
+// ═══════════════════════════════════════════════════════════════
+function alignIndicatorToDaily(dailyDates, dailySpx, indDates, indTrend) {
+  if (!dailyDates?.length || !indDates?.length) return null;
+  // Build a map: date string -> trend value
+  const trendMap = {};
+  for (let i = 0; i < indDates.length; i++) {
+    trendMap[indDates[i]] = indTrend[i];
+  }
+  const indStart = indDates[0];
+  const indEnd = indDates[indDates.length - 1];
+
+  const alignedDates = [];
+  const alignedSpx = [];
+  const alignedTrend = [];
+  let lastTrend = null;
+
+  for (let i = 0; i < dailyDates.length; i++) {
+    const d = dailyDates[i];
+    if (d < indStart) continue;
+    if (d > indEnd) break;
+    if (trendMap[d] !== undefined) lastTrend = trendMap[d];
+    if (lastTrend !== null && dailySpx[i] > 0) {
+      alignedDates.push(d);
+      alignedSpx.push(dailySpx[i]);
+      alignedTrend.push(lastTrend);
+    }
+  }
+  return { dates: alignedDates, spx: alignedSpx, trend: alignedTrend };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // RegimeChart — SPX line (white) with colored background bands
 // ═══════════════════════════════════════════════════════════════
 function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
@@ -408,15 +440,21 @@ function SignalBadge({ value }) {
 // ═══════════════════════════════════════════════════════════════
 // IndicatorRow — expandable
 // ═══════════════════════════════════════════════════════════════
-function IndicatorRow({ ind, index }) {
+function IndicatorRow({ ind, index, dailyDates, dailySpx }) {
   const [expanded, setExpanded] = useState(false);
   const [tf, setTf] = useState("2Y");
   const hasDates = ind.dates && ind.dates.length > 1;
 
+  // Align indicator's sparse trend to full daily SPX data
+  const aligned = useMemo(() => {
+    if (!hasDates || !dailyDates?.length) return null;
+    return alignIndicatorToDaily(dailyDates, dailySpx, ind.dates, ind.trend);
+  }, [ind, hasDates, dailyDates, dailySpx]);
+
   const sliced = useMemo(() => {
-    if (!hasDates) return null;
-    return sliceByTf(ind.dates, [ind.spx, ind.trend], tf);
-  }, [ind, tf, hasDates]);
+    if (!aligned) return null;
+    return sliceByTf(aligned.dates, [aligned.spx, aligned.trend], tf);
+  }, [aligned, tf]);
 
   return (
     <div style={{ background: expanded ? T.bgCard : "transparent", borderBottom: `1px solid ${T.border}` }}>
@@ -435,7 +473,7 @@ function IndicatorRow({ ind, index }) {
           <span style={{ color: T.dim, fontSize: 10 }}>{expanded ? "▾" : "▸"}</span>
         </div>
       </div>
-      {expanded && hasDates && sliced && (
+      {expanded && aligned && sliced && (
         <div style={{ padding: "4px 8px 10px" }}>
           <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 4 }}>
             <TimeframeBar value={tf} onChange={setTf} />
@@ -796,11 +834,11 @@ function CompositeSignalView({ data }) {
 
           {/* LT indicators */}
           <div style={{ padding: "6px 8px 2px", fontSize: 9, color: T.orange, fontWeight: 600, letterSpacing: 0.8 }}>LONG TERM</div>
-          {ltInds.map((ind, i) => <IndicatorRow key={ind.col} ind={ind} index={i + 1} />)}
+          {ltInds.map((ind, i) => <IndicatorRow key={ind.col} ind={ind} index={i + 1} dailyDates={data?.lt?.dates} dailySpx={data?.lt?.spx} />)}
 
           {/* THM indicators */}
           <div style={{ padding: "10px 8px 2px", fontSize: 9, color: T.orange, fontWeight: 600, letterSpacing: 0.8 }}>HEALTH MODEL</div>
-          {thmInds.map((ind, i) => <IndicatorRow key={ind.col} ind={ind} index={i + 4} />)}
+          {thmInds.map((ind, i) => <IndicatorRow key={ind.col} ind={ind} index={i + 4} dailyDates={data?.thm?.dates} dailySpx={data?.thm?.spx} />)}
         </div>
       </div>
     </>
