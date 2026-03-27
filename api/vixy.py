@@ -26,26 +26,29 @@ ctx.verify_mode = ssl.CERT_NONE
 
 
 def _fetch(ticker, p1, p2):
-    """Fetch daily close prices from Yahoo Finance v8 chart API."""
+    """Fetch daily close and open prices from Yahoo Finance v8 chart API."""
     url = YF_CHART.format(urllib.parse.quote(ticker, safe=""), p1, p2)
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, context=ctx, timeout=20) as r:
         j = json.loads(r.read())
     res = j["chart"]["result"][0]
     ts_list = res.get("timestamp", [])
+    quote = res["indicators"]["quote"][0]
+    opens = quote.get("open", [])
     # Use adjusted close if available, otherwise regular close
     adj = None
     if "adjclose" in res.get("indicators", {}):
         adj_list = res["indicators"]["adjclose"]
         if adj_list and "adjclose" in adj_list[0]:
             adj = adj_list[0]["adjclose"]
-    closes = adj if adj else res["indicators"]["quote"][0]["close"]
-    dates, prices = [], []
-    for t, c in zip(ts_list, closes):
-        if c is not None:
+    closes = adj if adj else quote["close"]
+    dates, close_px, open_px = [], [], []
+    for t, c, o in zip(ts_list, closes, opens):
+        if c is not None and o is not None:
             dates.append(datetime.utcfromtimestamp(t).strftime("%Y-%m-%d"))
-            prices.append(round(float(c), 4))
-    return dates, prices
+            close_px.append(round(float(c), 4))
+            open_px.append(round(float(o), 4))
+    return dates, close_px, open_px
 
 
 def _fetch_all(tickers, p1, p2):
@@ -56,14 +59,16 @@ def _fetch_all(tickers, p1, p2):
 
 
 def _align(raw):
-    """Align all tickers on common trading dates."""
-    sets = [set(d) for d, _ in raw.values()]
+    """Align all tickers on common trading dates. Returns close and open dicts."""
+    sets = [set(d) for d, _, _ in raw.values()]
     common = sorted(sets[0].intersection(*sets[1:]))
-    out = {}
-    for tk, (dates, prices) in raw.items():
-        lk = dict(zip(dates, prices))
-        out[tk] = [lk[d] for d in common]
-    return common, out
+    closes, opens = {}, {}
+    for tk, (dates, close_px, open_px) in raw.items():
+        clk = dict(zip(dates, close_px))
+        olk = dict(zip(dates, open_px))
+        closes[tk] = [clk[d] for d in common]
+        opens[tk] = [olk[d] for d in common]
+    return common, closes, opens
 
 
 def _ret(prices):
@@ -122,19 +127,25 @@ def _stats(equity, port_ret):
     )
 
 
-def _strat(spy_r, vixy_r, signal, vix, sizing, spy_w=0.80, vixy_w=0.20):
-    """Run a strategy variant and return equity curve, weights, stats."""
-    n = len(spy_r)
+def _strat(spy_o2o, vixy_o2o, signal, vix, sizing, spy_w=0.80, vixy_w=0.20):
+    """Run a strategy variant using open-to-open returns (trade at next open).
+
+    Signal from close of day i determines position for open i+1 → open i+2.
+    spy_o2o[i] = open[i+1]/open[i] - 1 (already shifted so index i = day i).
+    """
+    n = len(spy_o2o)
+    # Signal at close i → position applied to o2o return of day i+1
+    # EXEC_LAG=1 shifts signal: sig[i] = signal[i - EXEC_LAG]
     sig = [0.0] * EXEC_LAG + signal[: n - EXEC_LAG]
     hw = [
         (sig[i] * (vix[i] / 100.0) if sizing else sig[i] * vixy_w) for i in range(n)
     ]
-    pr = [spy_w * spy_r[i] + hw[i] * vixy_r[i] for i in range(n)]
+    pr = [spy_w * spy_o2o[i] + hw[i] * vixy_o2o[i] for i in range(n)]
     eq = [100.0]
     for i in range(1, n):
         eq.append(eq[-1] * (1 + pr[i]))
     # VIXY sleeve equity (standalone contribution)
-    slr = [hw[i] * vixy_r[i] for i in range(n)]
+    slr = [hw[i] * vixy_o2o[i] for i in range(n)]
     sleq = [1.0]
     for i in range(1, n):
         sleq.append(sleq[-1] * (1 + slr[i]))
@@ -152,7 +163,7 @@ def _compute():
     p2 = int(time.time())
 
     raw = _fetch_all(["SPY", "VIXY", "^VIX", "^VIX3M", "^GSPC"], p1, p2)
-    dates, al = _align(raw)
+    dates, al, al_open = _align(raw)
     if len(dates) < 100:
         raise ValueError(f"Insufficient aligned data: {len(dates)} days")
 
@@ -163,8 +174,19 @@ def _compute():
         al["^VIX3M"],
         al["^GSPC"],
     )
+    spy_open, vixy_open = al_open["SPY"], al_open["VIXY"]
     n = len(dates)
-    spy_r, vixy_r, gspc_r = _ret(spy), _ret(vixy), _ret(gspc)
+    gspc_r = _ret(gspc)  # close-to-close for realized vol calculation
+
+    # Open-to-open returns for execution: o2o[i] = open[i+1]/open[i] - 1
+    # Last element uses close as proxy for next open
+    def _o2o(opn, cls):
+        r = [0.0]
+        for i in range(1, len(opn)):
+            r.append((opn[i] / opn[i - 1] - 1) if opn[i - 1] > 0 else 0.0)
+        return r
+    spy_o2o = _o2o(spy_open, spy)
+    vixy_o2o = _o2o(vixy_open, vixy)
 
     # Realized vol windows
     rv5 = _rvol(gspc_r, 5)
@@ -216,22 +238,22 @@ def _compute():
     # ── Strategies ───────────────────────────────────────────
     strats = {}
 
-    # 100% SPY buy-and-hold
+    # 100% SPY buy-and-hold (also using open-to-open for consistency)
     spy_eq = [100.0]
     for i in range(1, n):
-        spy_eq.append(spy_eq[-1] * (1 + spy_r[i]))
+        spy_eq.append(spy_eq[-1] * (1 + spy_o2o[i]))
     strats["100% SPY"] = dict(
         equity=[round(v, 2) for v in spy_eq],
         hedge_weight=[0.0] * n,
         vixy_sleeve_equity=[1.0] * n,
-        stats=_stats(spy_eq, spy_r),
+        stats=_stats(spy_eq, spy_o2o),
     )
 
-    strats["Benchmark VIX>VIX3M"] = _strat(spy_r, vixy_r, sig_bm, vix, False)
-    strats["Fixed eVRP(10D)"] = _strat(spy_r, vixy_r, sig_e10, vix, False)
-    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_r, vixy_r, sig_e10_m30, vix, False)
-    strats["Sizing eVRP(10D)"] = _strat(spy_r, vixy_r, sig_e10, vix, True)
-    strats["Sizing eVRP(5D)+MA30"] = _strat(spy_r, vixy_r, sig_e5_m30, vix, True)
+    strats["Benchmark VIX>VIX3M"] = _strat(spy_o2o, vixy_o2o, sig_bm, vix, False)
+    strats["Fixed eVRP(10D)"] = _strat(spy_o2o, vixy_o2o, sig_e10, vix, False)
+    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_o2o, vixy_o2o, sig_e10_m30, vix, False)
+    strats["Sizing eVRP(10D)"] = _strat(spy_o2o, vixy_o2o, sig_e10, vix, True)
+    strats["Sizing eVRP(5D)+MA30"] = _strat(spy_o2o, vixy_o2o, sig_e5_m30, vix, True)
 
     # ── Current signals ──────────────────────────────────────
     li = n - 1
