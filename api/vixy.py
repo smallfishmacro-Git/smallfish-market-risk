@@ -25,7 +25,11 @@ ctx.verify_mode = ssl.CERT_NONE
 
 
 def _fetch(ticker, p1, p2):
-    """Fetch daily close and open prices from Yahoo Finance v8 chart API."""
+    """Fetch daily close and open prices from Yahoo Finance v8 chart API.
+
+    Open prices are adjusted using the same split/dividend factor as close
+    to ensure open-to-close and close-to-open returns are consistent.
+    """
     url = YF_CHART.format(urllib.parse.quote(ticker, safe=""), p1, p2)
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, context=ctx, timeout=20) as r:
@@ -33,20 +37,23 @@ def _fetch(ticker, p1, p2):
     res = j["chart"]["result"][0]
     ts_list = res.get("timestamp", [])
     quote = res["indicators"]["quote"][0]
-    opens = quote.get("open", [])
+    raw_opens = quote.get("open", [])
+    raw_closes = quote.get("close", [])
     # Use adjusted close if available, otherwise regular close
-    adj = None
+    adj_closes = None
     if "adjclose" in res.get("indicators", {}):
         adj_list = res["indicators"]["adjclose"]
         if adj_list and "adjclose" in adj_list[0]:
-            adj = adj_list[0]["adjclose"]
-    closes = adj if adj else quote["close"]
+            adj_closes = adj_list[0]["adjclose"]
     dates, close_px, open_px = [], [], []
-    for t, c, o in zip(ts_list, closes, opens):
-        if c is not None and o is not None:
+    for t, rc, ro, ac in zip(ts_list, raw_closes, raw_opens,
+                              adj_closes if adj_closes else raw_closes):
+        if rc is not None and ro is not None and ac is not None and rc != 0:
+            # Adjustment factor: adjclose / rawclose (accounts for splits + dividends)
+            adj_factor = float(ac) / float(rc)
             dates.append(datetime.utcfromtimestamp(t).strftime("%Y-%m-%d"))
-            close_px.append(round(float(c), 4))
-            open_px.append(round(float(o), 4))
+            close_px.append(round(float(ac), 4))
+            open_px.append(round(float(ro) * adj_factor, 4))
     return dates, close_px, open_px
 
 
