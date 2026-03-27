@@ -1239,6 +1239,56 @@ function VixyModelView({ data, loading, error, onRetry }) {
                 yFormat={v => `$${v.toFixed(3)}`} height={200} />
             </div>
           </div>
+
+          {/* Transaction history — last 2 years */}
+          <div style={{ padding: "8px 8px 0" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>
+              TRANSACTION HISTORY <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>last 2 years</span>
+            </div>
+            <InfoBox>
+              <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+              Each row is a hedge on/off transition. ENTER = signal turned on (buy VIXY at open). EXIT = signal turned off (sell VIXY at open).
+            </InfoBox>
+            <div style={{ maxHeight: 220, overflow: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                    {["DATE", "ACTION", "VIXY WT", "SPY", "VIXY"].map(h => (
+                      <th key={h} style={{ padding: "5px 4px", textAlign: h === "DATE" || h === "ACTION" ? "left" : "right",
+                        color: T.dim, fontWeight: 600, letterSpacing: 0.5,
+                        position: "sticky", top: 0, background: T.bg, zIndex: 1 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const cutoff2y = new Date();
+                    cutoff2y.setFullYear(cutoff2y.getFullYear() - 2);
+                    const cutStr = cutoff2y.toISOString().split("T")[0];
+                    const fullDates = data.dates;
+                    const fullHw = strat.hedge_weight;
+                    const txns = [];
+                    for (let i = 1; i < fullDates.length; i++) {
+                      if (fullDates[i] < cutStr) continue;
+                      const prev = fullHw[i - 1] > 0;
+                      const curr = fullHw[i] > 0;
+                      if (curr && !prev) txns.push({ date: fullDates[i], action: "ENTER", weight: fullHw[i], spy: data.spy_price[i], vixy: data.vixy_price[i] });
+                      else if (!curr && prev) txns.push({ date: fullDates[i], action: "EXIT", weight: 0, spy: data.spy_price[i], vixy: data.vixy_price[i] });
+                    }
+                    return txns.reverse().map((t, i) => (
+                      <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td style={{ padding: "4px 4px", color: T.text }}>{t.date}</td>
+                        <td style={{ padding: "4px 4px", color: t.action === "ENTER" ? T.green : T.red, fontWeight: 600 }}>{t.action}</td>
+                        <td style={{ padding: "4px 4px", textAlign: "right", color: T.orange }}>{(t.weight * 100).toFixed(1)}%</td>
+                        <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.spy}</td>
+                        <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.vixy}</td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </>
