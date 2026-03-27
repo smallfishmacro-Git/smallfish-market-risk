@@ -18,7 +18,6 @@ from concurrent.futures import ThreadPoolExecutor
 YF_CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{}?period1={}&period2={}&interval=1d"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 TRADING_DAYS = 252
-EXEC_LAG = 1
 
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
@@ -127,28 +126,44 @@ def _stats(equity, port_ret):
     )
 
 
-def _strat(spy_o2o, vixy_o2o, signal, vix, sizing, spy_w=0.80, vixy_w=0.20):
-    """Run a strategy variant using open-to-open returns (trade at next open).
+def _strat(spy_open, vixy_open, signal, vix, n, sizing, spy_w=0.80, vixy_w=0.20):
+    """Run a strategy with correct open-price execution.
 
-    Signal from close of day i determines position for open i+1 → open i+2.
-    spy_o2o[i] = open[i+1]/open[i] - 1 (already shifted so index i = day i).
+    Timing convention (all arrays indexed by trading day i = 0..n-1):
+      - signal[i]  = computed at CLOSE of day i (uses close prices)
+      - hw[i]      = VIXY weight held from OPEN of day i to OPEN of day i+1
+                     Determined by signal[i-1] (close of previous day)
+      - exec price = open[i] (where we enter/exit)
+      - return     = open[i+1]/open[i] - 1 (earned while holding from open i to open i+1)
+
+    So: signal at close of day i-1 → trade at open of day i → earn return open[i+1]/open[i]-1
     """
-    n = len(spy_o2o)
-    # Signal at close i → position applied to o2o return of day i+1
-    # EXEC_LAG=1 shifts signal: sig[i] = signal[i - EXEC_LAG]
-    sig = [0.0] * EXEC_LAG + signal[: n - EXEC_LAG]
-    hw = [
-        (sig[i] * (vix[i] / 100.0) if sizing else sig[i] * vixy_w) for i in range(n)
-    ]
-    pr = [spy_w * spy_o2o[i] + hw[i] * vixy_o2o[i] for i in range(n)]
+    # hw[i] = weight active from open[i] to open[i+1]
+    # hw[0] = 0 (no signal before day 0)
+    hw = [0.0] * n
+    for i in range(1, n):
+        if signal[i - 1] > 0:
+            # Size determined at signal time: close of day i-1
+            hw[i] = (vix[i - 1] / 100.0) if sizing else vixy_w
+
+    # Portfolio return from open[i] to open[i+1]
+    # Equity at index i represents value at open of day i
     eq = [100.0]
-    for i in range(1, n):
-        eq.append(eq[-1] * (1 + pr[i]))
-    # VIXY sleeve equity (standalone contribution)
-    slr = [hw[i] * vixy_o2o[i] for i in range(n)]
+    pr = [0.0]  # no return on day 0
+    for i in range(n - 1):
+        r_spy = (spy_open[i + 1] / spy_open[i] - 1) if spy_open[i] > 0 else 0.0
+        r_vixy = (vixy_open[i + 1] / vixy_open[i] - 1) if vixy_open[i] > 0 else 0.0
+        day_ret = spy_w * r_spy + hw[i] * r_vixy
+        pr.append(day_ret)
+        eq.append(eq[-1] * (1 + day_ret))
+
+    # VIXY sleeve equity: growth of $1 from hedge component only
     sleq = [1.0]
-    for i in range(1, n):
-        sleq.append(sleq[-1] * (1 + slr[i]))
+    for i in range(n - 1):
+        r_vixy = (vixy_open[i + 1] / vixy_open[i] - 1) if vixy_open[i] > 0 else 0.0
+        slr = hw[i] * r_vixy
+        sleq.append(sleq[-1] * (1 + slr))
+
     return dict(
         equity=[round(v, 2) for v in eq],
         hedge_weight=[round(v, 4) for v in hw],
@@ -177,16 +192,6 @@ def _compute():
     spy_open, vixy_open = al_open["SPY"], al_open["VIXY"]
     n = len(dates)
     gspc_r = _ret(gspc)  # close-to-close for realized vol calculation
-
-    # Open-to-open returns for execution: o2o[i] = open[i+1]/open[i] - 1
-    # Last element uses close as proxy for next open
-    def _o2o(opn, cls):
-        r = [0.0]
-        for i in range(1, len(opn)):
-            r.append((opn[i] / opn[i - 1] - 1) if opn[i - 1] > 0 else 0.0)
-        return r
-    spy_o2o = _o2o(spy_open, spy)
-    vixy_o2o = _o2o(vixy_open, vixy)
 
     # Realized vol windows
     rv5 = _rvol(gspc_r, 5)
@@ -238,22 +243,25 @@ def _compute():
     # ── Strategies ───────────────────────────────────────────
     strats = {}
 
-    # 100% SPY buy-and-hold (also using open-to-open for consistency)
+    # 100% SPY buy-and-hold (open-to-open)
     spy_eq = [100.0]
-    for i in range(1, n):
-        spy_eq.append(spy_eq[-1] * (1 + spy_o2o[i]))
+    spy_pr = [0.0]
+    for i in range(n - 1):
+        r = (spy_open[i + 1] / spy_open[i] - 1) if spy_open[i] > 0 else 0.0
+        spy_pr.append(r)
+        spy_eq.append(spy_eq[-1] * (1 + r))
     strats["100% SPY"] = dict(
         equity=[round(v, 2) for v in spy_eq],
         hedge_weight=[0.0] * n,
         vixy_sleeve_equity=[1.0] * n,
-        stats=_stats(spy_eq, spy_o2o),
+        stats=_stats(spy_eq, spy_pr),
     )
 
-    strats["Benchmark VIX>VIX3M"] = _strat(spy_o2o, vixy_o2o, sig_bm, vix, False)
-    strats["Fixed eVRP(10D)"] = _strat(spy_o2o, vixy_o2o, sig_e10, vix, False)
-    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_o2o, vixy_o2o, sig_e10_m30, vix, False)
-    strats["Sizing eVRP(10D)"] = _strat(spy_o2o, vixy_o2o, sig_e10, vix, True)
-    strats["Sizing eVRP(5D)+MA30"] = _strat(spy_o2o, vixy_o2o, sig_e5_m30, vix, True)
+    strats["Benchmark VIX>VIX3M"] = _strat(spy_open, vixy_open, sig_bm, vix, n, False)
+    strats["Fixed eVRP(10D)"] = _strat(spy_open, vixy_open, sig_e10, vix, n, False)
+    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_open, vixy_open, sig_e10_m30, vix, n, False)
+    strats["Sizing eVRP(10D)"] = _strat(spy_open, vixy_open, sig_e10, vix, n, True)
+    strats["Sizing eVRP(5D)+MA30"] = _strat(spy_open, vixy_open, sig_e5_m30, vix, n, True)
 
     # ── Current signals ──────────────────────────────────────
     li = n - 1
@@ -278,6 +286,8 @@ def _compute():
         dates=dates,
         spy_price=rnd(spy),
         vixy_price=rnd(vixy),
+        spy_open=rnd(spy_open),
+        vixy_open=rnd(vixy_open),
         vix=rnd(vix),
         vix3m=rnd(vix3m),
         evrp_10d=rnd(evrp10),

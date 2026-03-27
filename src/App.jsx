@@ -1253,7 +1253,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                    {["DATE", "ACTION", "VIXY WT", "SPY", "VIXY"].map(h => (
+                    {["DATE", "ACTION", "VIXY WT", "SPY OPEN", "VIXY OPEN"].map(h => (
                       <th key={h} style={{ padding: "5px 4px", textAlign: h === "DATE" || h === "ACTION" ? "left" : "right",
                         color: T.dim, fontWeight: 600, letterSpacing: 0.5,
                         position: "sticky", top: 0, background: T.bg, zIndex: 1 }}>{h}</th>
@@ -1272,8 +1272,8 @@ function VixyModelView({ data, loading, error, onRetry }) {
                       if (fullDates[i] < cutStr) continue;
                       const prev = fullHw[i - 1] > 0;
                       const curr = fullHw[i] > 0;
-                      if (curr && !prev) txns.push({ date: fullDates[i], action: "ENTER", weight: fullHw[i], spy: data.spy_price[i], vixy: data.vixy_price[i] });
-                      else if (!curr && prev) txns.push({ date: fullDates[i], action: "EXIT", weight: 0, spy: data.spy_price[i], vixy: data.vixy_price[i] });
+                      if (curr && !prev) txns.push({ date: fullDates[i], action: "ENTER", weight: fullHw[i], spy: data.spy_open?.[i], vixy: data.vixy_open?.[i] });
+                      else if (!curr && prev) txns.push({ date: fullDates[i], action: "EXIT", weight: 0, spy: data.spy_open?.[i], vixy: data.vixy_open?.[i] });
                     }
                     return txns.reverse().map((t, i) => (
                       <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
