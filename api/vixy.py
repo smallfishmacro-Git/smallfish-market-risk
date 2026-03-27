@@ -193,6 +193,38 @@ def _strat(spy_close, vixy_close, spy_open, vixy_open, signal, vix, n,
     )
 
 
+def _strat_c2c(spy_close, vixy_close, signal, vix, n,
+               sizing, spy_w=0.80, vixy_w=0.20):
+    """Close-to-close backtest as in the Quantpedia article.
+
+    Signal at close of day i-1 → position active on day i.
+    All returns are close[i]/close[i-1] - 1. One-day execution lag.
+    """
+    hw = [0.0] * n
+    for i in range(1, n):
+        if signal[i - 1] > 0:
+            hw[i] = (vix[i - 1] / 100.0) if sizing else vixy_w
+
+    eq = [100.0]
+    pr = [0.0]
+    sleq = [1.0]
+    for i in range(1, n):
+        r_spy = (spy_close[i] / spy_close[i - 1] - 1) if spy_close[i - 1] > 0 else 0.0
+        r_vixy = (vixy_close[i] / vixy_close[i - 1] - 1) if vixy_close[i - 1] > 0 else 0.0
+        vixy_contrib = hw[i] * r_vixy
+        day_ret = spy_w * r_spy + vixy_contrib
+        pr.append(day_ret)
+        eq.append(eq[-1] * (1 + day_ret))
+        sleq.append(sleq[-1] * (1 + vixy_contrib))
+
+    return dict(
+        equity=[round(v, 2) for v in eq],
+        hedge_weight=[round(v, 4) for v in hw],
+        vixy_sleeve_equity=[round(v, 6) for v in sleq],
+        stats=_stats(eq, pr),
+    )
+
+
 def _compute():
     """Main computation: fetch data, compute signals, run strategies."""
     p1 = int(datetime(2011, 1, 1).timestamp())
@@ -284,6 +316,15 @@ def _compute():
     strats["Sizing eVRP(10D)"] = _strat(spy, vixy, spy_open, vixy_open, sig_e10, vix, n, True)
     strats["Sizing eVRP(5D)+MA30"] = _strat(spy, vixy, spy_open, vixy_open, sig_e5_m30, vix, n, True)
 
+    # Close-to-close strategies (Quantpedia article style)
+    c2c = {}
+    c2c["100% SPY"] = strats["100% SPY"]  # same for buy-and-hold
+    c2c["Benchmark VIX>VIX3M"] = _strat_c2c(spy, vixy, sig_bm, vix, n, False)
+    c2c["Fixed eVRP(10D)"] = _strat_c2c(spy, vixy, sig_e10, vix, n, False)
+    c2c["Fixed eVRP(10D)+MA30"] = _strat_c2c(spy, vixy, sig_e10_m30, vix, n, False)
+    c2c["Sizing eVRP(10D)"] = _strat_c2c(spy, vixy, sig_e10, vix, n, True)
+    c2c["Sizing eVRP(5D)+MA30"] = _strat_c2c(spy, vixy, sig_e5_m30, vix, n, True)
+
     # ── Current signals ──────────────────────────────────────
     li = n - 1
     curr = dict(
@@ -314,6 +355,7 @@ def _compute():
         evrp_10d=rnd(evrp10),
         evrp_5d=rnd(evrp5),
         strategies=strats,
+        strategies_c2c=c2c,
         current_signals=curr,
         computed_at=datetime.utcnow().isoformat() + "Z",
     )

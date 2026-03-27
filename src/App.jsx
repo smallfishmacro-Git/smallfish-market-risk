@@ -1097,6 +1097,7 @@ const VIXY_STRATS = [
 function VixyModelView({ data, loading, error, onRetry }) {
   const [selStrat, setSelStrat] = useState("Sizing eVRP(5D)+MA30");
   const [tf, setTf] = useState("ALL");
+  const [execMode, setExecMode] = useState("REALISTIC");
 
   if (loading) return (
     <div style={{ textAlign: "center", paddingTop: 100 }}>
@@ -1113,8 +1114,9 @@ function VixyModelView({ data, loading, error, onRetry }) {
   );
   if (!data?.strategies) return null;
 
-  const strat = data.strategies[selStrat];
-  const spy = data.strategies["100% SPY"];
+  const stratSource = execMode === "C2C" ? (data.strategies_c2c || data.strategies) : data.strategies;
+  const strat = stratSource[selStrat];
+  const spy = stratSource["100% SPY"];
   if (!strat || !spy) return null;
 
   // Apply timeframe filter
@@ -1144,6 +1146,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "6px 0", borderBottom: `1px solid ${T.border}`, flexWrap: "wrap", gap: 8 }}>
         <ButtonStrip label="STRATEGY" options={VIXY_STRATS.map(s => ({ value: s.key, label: s.label }))} value={selStrat} onChange={setSelStrat} />
+        <ButtonStrip label="EXECUTION" options={[{value:"REALISTIC",label:"REALISTIC"},{value:"C2C",label:"CLOSE-TO-CLOSE"}]} value={execMode} onChange={setExecMode} />
         <TimeframeBar value={tf} onChange={setTf} />
       </div>
 
@@ -1208,7 +1211,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
               </thead>
               <tbody>
                 {[{ key: "100% SPY", label: "100% SPY" }, ...VIXY_STRATS].map(({ key, label }) => {
-                  const st = data.strategies[key]?.stats;
+                  const st = stratSource[key]?.stats;
                   if (!st) return null;
                   const active = key === selStrat;
                   return (
@@ -1247,13 +1250,13 @@ function VixyModelView({ data, loading, error, onRetry }) {
             </div>
             <InfoBox>
               <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
-              Each row is a hedge on/off transition. ENTER = signal turned on (buy VIXY at open). EXIT = signal turned off (sell VIXY at open).
+              Each row is a hedge on/off transition. ENTER = signal turned on ({execMode === "C2C" ? "buy VIXY at close" : "buy VIXY at open"}). EXIT = signal turned off ({execMode === "C2C" ? "sell VIXY at close" : "sell VIXY at open"}).
             </InfoBox>
             <div style={{ maxHeight: 220, overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                    {["DATE", "ACTION", "VIXY WT", "SPY OPEN", "VIXY OPEN"].map(h => (
+                    {["DATE", "ACTION", "VIXY WT", execMode === "C2C" ? "SPY CLOSE" : "SPY OPEN", execMode === "C2C" ? "VIXY CLOSE" : "VIXY OPEN"].map(h => (
                       <th key={h} style={{ padding: "5px 4px", textAlign: h === "DATE" || h === "ACTION" ? "left" : "right",
                         color: T.dim, fontWeight: 600, letterSpacing: 0.5,
                         position: "sticky", top: 0, background: T.bg, zIndex: 1 }}>{h}</th>
@@ -1268,12 +1271,13 @@ function VixyModelView({ data, loading, error, onRetry }) {
                     const fullDates = data.dates;
                     const fullHw = strat.hedge_weight;
                     const txns = [];
+                    const useOpen = execMode !== "C2C";
                     for (let i = 1; i < fullDates.length; i++) {
                       if (fullDates[i] < cutStr) continue;
                       const prev = fullHw[i - 1] > 0;
                       const curr = fullHw[i] > 0;
-                      if (curr && !prev) txns.push({ date: fullDates[i], action: "ENTER", weight: fullHw[i], spy: data.spy_open?.[i], vixy: data.vixy_open?.[i] });
-                      else if (!curr && prev) txns.push({ date: fullDates[i], action: "EXIT", weight: 0, spy: data.spy_open?.[i], vixy: data.vixy_open?.[i] });
+                      if (curr && !prev) txns.push({ date: fullDates[i], action: "ENTER", weight: fullHw[i], spy: useOpen ? data.spy_open?.[i] : data.spy_price?.[i], vixy: useOpen ? data.vixy_open?.[i] : data.vixy_price?.[i] });
+                      else if (!curr && prev) txns.push({ date: fullDates[i], action: "EXIT", weight: 0, spy: useOpen ? data.spy_open?.[i] : data.spy_price?.[i], vixy: useOpen ? data.vixy_open?.[i] : data.vixy_price?.[i] });
                     }
                     return txns.reverse().map((t, i) => (
                       <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
