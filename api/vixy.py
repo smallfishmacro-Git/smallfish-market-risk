@@ -126,43 +126,64 @@ def _stats(equity, port_ret):
     )
 
 
-def _strat(spy_open, vixy_open, signal, vix, n, sizing, spy_w=0.80, vixy_w=0.20):
-    """Run a strategy with correct open-price execution.
+def _strat(spy_close, vixy_close, spy_open, vixy_open, signal, vix, n,
+           sizing, spy_w=0.80, vixy_w=0.20):
+    """Run a strategy modelling a real portfolio valued at market close.
 
     Timing convention (all arrays indexed by trading day i = 0..n-1):
-      - signal[i]  = computed at CLOSE of day i (uses close prices)
-      - hw[i]      = VIXY weight held from OPEN of day i to OPEN of day i+1
-                     Determined by signal[i-1] (close of previous day)
-      - exec price = open[i] (where we enter/exit)
-      - return     = open[i+1]/open[i] - 1 (earned while holding from open i to open i+1)
+      - signal[i]    = computed at CLOSE of day i
+      - hw[i]        = VIXY weight for day i, decided by signal[i-1]
+      - Execution    = at OPEN of day i
+      - Portfolio     = valued at CLOSE each day
 
-    So: signal at close of day i-1 → trade at open of day i → earn return open[i+1]/open[i]-1
+    Return calculation for the VIXY component on day i (i >= 1):
+      - ENTER (hw[i-1]=0 → hw[i]>0): buy at open[i], value at close[i]
+        vixy_ret = close[i] / open[i] - 1, weight = hw[i]
+      - EXIT (hw[i-1]>0 → hw[i]=0): sell at open[i], had position overnight
+        vixy_ret = open[i] / close[i-1] - 1, weight = hw[i-1]
+      - STAY IN (hw[i-1]>0 → hw[i]>0): if weight changes, split overnight/intraday
+        overnight = open[i] / close[i-1] - 1  (weight = hw[i-1])
+        intraday  = close[i] / open[i] - 1    (weight = hw[i], after rebalance)
+      - STAY OUT: 0
+
+    SPY component: always close-to-close (80% weight, no trading).
     """
-    # hw[i] = weight active from open[i] to open[i+1]
-    # hw[0] = 0 (no signal before day 0)
+    # hw[i] = weight for day i, determined by signal at close of day i-1
     hw = [0.0] * n
     for i in range(1, n):
         if signal[i - 1] > 0:
-            # Size determined at signal time: close of day i-1
             hw[i] = (vix[i - 1] / 100.0) if sizing else vixy_w
 
-    # Portfolio return from open[i] to open[i+1]
-    # Equity at index i represents value at open of day i
     eq = [100.0]
-    pr = [0.0]  # no return on day 0
-    for i in range(n - 1):
-        r_spy = (spy_open[i + 1] / spy_open[i] - 1) if spy_open[i] > 0 else 0.0
-        r_vixy = (vixy_open[i + 1] / vixy_open[i] - 1) if vixy_open[i] > 0 else 0.0
-        day_ret = spy_w * r_spy + hw[i] * r_vixy
+    pr = [0.0]
+    sleq = [1.0]
+    for i in range(1, n):
+        # SPY: always close-to-close
+        r_spy = (spy_close[i] / spy_close[i - 1] - 1) if spy_close[i - 1] > 0 else 0.0
+
+        was_in = hw[i - 1] > 0
+        now_in = hw[i] > 0
+
+        if now_in and not was_in:
+            # ENTER at open[i]
+            r_vixy = (vixy_close[i] / vixy_open[i] - 1) if vixy_open[i] > 0 else 0.0
+            vixy_contrib = hw[i] * r_vixy
+        elif was_in and not now_in:
+            # EXIT at open[i] — capture overnight gap from close[i-1] to open[i]
+            r_vixy = (vixy_open[i] / vixy_close[i - 1] - 1) if vixy_close[i - 1] > 0 else 0.0
+            vixy_contrib = hw[i - 1] * r_vixy
+        elif was_in and now_in:
+            # STAY IN — split into overnight (old weight) and intraday (new weight)
+            r_overnight = (vixy_open[i] / vixy_close[i - 1] - 1) if vixy_close[i - 1] > 0 else 0.0
+            r_intraday = (vixy_close[i] / vixy_open[i] - 1) if vixy_open[i] > 0 else 0.0
+            vixy_contrib = hw[i - 1] * r_overnight + hw[i] * r_intraday
+        else:
+            vixy_contrib = 0.0
+
+        day_ret = spy_w * r_spy + vixy_contrib
         pr.append(day_ret)
         eq.append(eq[-1] * (1 + day_ret))
-
-    # VIXY sleeve equity: growth of $1 from hedge component only
-    sleq = [1.0]
-    for i in range(n - 1):
-        r_vixy = (vixy_open[i + 1] / vixy_open[i] - 1) if vixy_open[i] > 0 else 0.0
-        slr = hw[i] * r_vixy
-        sleq.append(sleq[-1] * (1 + slr))
+        sleq.append(sleq[-1] * (1 + vixy_contrib))
 
     return dict(
         equity=[round(v, 2) for v in eq],
@@ -243,11 +264,11 @@ def _compute():
     # ── Strategies ───────────────────────────────────────────
     strats = {}
 
-    # 100% SPY buy-and-hold (open-to-open)
+    # 100% SPY buy-and-hold (close-to-close, no trades)
     spy_eq = [100.0]
     spy_pr = [0.0]
-    for i in range(n - 1):
-        r = (spy_open[i + 1] / spy_open[i] - 1) if spy_open[i] > 0 else 0.0
+    for i in range(1, n):
+        r = (spy[i] / spy[i - 1] - 1) if spy[i - 1] > 0 else 0.0
         spy_pr.append(r)
         spy_eq.append(spy_eq[-1] * (1 + r))
     strats["100% SPY"] = dict(
@@ -257,11 +278,11 @@ def _compute():
         stats=_stats(spy_eq, spy_pr),
     )
 
-    strats["Benchmark VIX>VIX3M"] = _strat(spy_open, vixy_open, sig_bm, vix, n, False)
-    strats["Fixed eVRP(10D)"] = _strat(spy_open, vixy_open, sig_e10, vix, n, False)
-    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_open, vixy_open, sig_e10_m30, vix, n, False)
-    strats["Sizing eVRP(10D)"] = _strat(spy_open, vixy_open, sig_e10, vix, n, True)
-    strats["Sizing eVRP(5D)+MA30"] = _strat(spy_open, vixy_open, sig_e5_m30, vix, n, True)
+    strats["Benchmark VIX>VIX3M"] = _strat(spy, vixy, spy_open, vixy_open, sig_bm, vix, n, False)
+    strats["Fixed eVRP(10D)"] = _strat(spy, vixy, spy_open, vixy_open, sig_e10, vix, n, False)
+    strats["Fixed eVRP(10D)+MA30"] = _strat(spy, vixy, spy_open, vixy_open, sig_e10_m30, vix, n, False)
+    strats["Sizing eVRP(10D)"] = _strat(spy, vixy, spy_open, vixy_open, sig_e10, vix, n, True)
+    strats["Sizing eVRP(5D)+MA30"] = _strat(spy, vixy, spy_open, vixy_open, sig_e5_m30, vix, n, True)
 
     # ── Current signals ──────────────────────────────────────
     li = n - 1
