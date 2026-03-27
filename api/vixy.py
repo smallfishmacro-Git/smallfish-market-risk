@@ -225,26 +225,10 @@ def _strat_c2c(spy_close, vixy_close, signal, vix, n,
     )
 
 
-def _compute():
-    """Main computation: fetch data, compute signals, run strategies."""
-    p1 = int(datetime(2011, 1, 1).timestamp())
-    p2 = int(time.time())
-
-    raw = _fetch_all(["SPY", "VIXY", "^VIX", "^VIX3M", "^GSPC"], p1, p2)
-    dates, al, al_open = _align(raw)
-    if len(dates) < 100:
-        raise ValueError(f"Insufficient aligned data: {len(dates)} days")
-
-    spy, vixy, vix, vix3m, gspc = (
-        al["SPY"],
-        al["VIXY"],
-        al["^VIX"],
-        al["^VIX3M"],
-        al["^GSPC"],
-    )
-    spy_open, vixy_open = al_open["SPY"], al_open["VIXY"]
+def _build(dates, spy_close, hedge_close, spy_open, hedge_open, vix, vix3m, gspc):
+    """Build signals, strategies, and price arrays for a given hedge instrument."""
     n = len(dates)
-    gspc_r = _ret(gspc)  # close-to-close for realized vol calculation
+    gspc_r = _ret(gspc)
 
     # Realized vol windows
     rv5 = _rvol(gspc_r, 5)
@@ -252,43 +236,27 @@ def _compute():
 
     # VIX moving averages
     ma30 = _ma(vix, 30)
-    ma90 = _ma(vix, 90)
 
     # eVRP = implied vol - realized vol
     evrp5 = [None if rv5[i] is None else vix[i] - rv5[i] for i in range(n)]
     evrp10 = [None if rv10[i] is None else vix[i] - rv10[i] for i in range(n)]
 
     # ── Signals ──────────────────────────────────────────────
-    # Benchmark: VIX > VIX3M → hedge on
     sig_bm = [1.0 if vix[i] > vix3m[i] else 0.0 for i in range(n)]
-
-    # eVRP(10D) <= 0 → hedge on
     sig_e10 = [
         1.0 if evrp10[i] is not None and evrp10[i] <= 0 else 0.0 for i in range(n)
     ]
-
-    # eVRP(10D) <= 0 AND VIX > 30D MA
     sig_e10_m30 = [
         1.0
-        if (
-            evrp10[i] is not None
-            and evrp10[i] <= 0
-            and ma30[i] is not None
-            and vix[i] > ma30[i]
-        )
+        if (evrp10[i] is not None and evrp10[i] <= 0
+            and ma30[i] is not None and vix[i] > ma30[i])
         else 0.0
         for i in range(n)
     ]
-
-    # eVRP(5D) <= 0 AND VIX > 30D MA
     sig_e5_m30 = [
         1.0
-        if (
-            evrp5[i] is not None
-            and evrp5[i] <= 0
-            and ma30[i] is not None
-            and vix[i] > ma30[i]
-        )
+        if (evrp5[i] is not None and evrp5[i] <= 0
+            and ma30[i] is not None and vix[i] > ma30[i])
         else 0.0
         for i in range(n)
     ]
@@ -296,11 +264,11 @@ def _compute():
     # ── Strategies ───────────────────────────────────────────
     strats = {}
 
-    # 100% SPY buy-and-hold (close-to-close, no trades)
+    # 100% SPY buy-and-hold
     spy_eq = [100.0]
     spy_pr = [0.0]
     for i in range(1, n):
-        r = (spy[i] / spy[i - 1] - 1) if spy[i - 1] > 0 else 0.0
+        r = (spy_close[i] / spy_close[i - 1] - 1) if spy_close[i - 1] > 0 else 0.0
         spy_pr.append(r)
         spy_eq.append(spy_eq[-1] * (1 + r))
     strats["100% SPY"] = dict(
@@ -310,52 +278,93 @@ def _compute():
         stats=_stats(spy_eq, spy_pr),
     )
 
-    strats["Benchmark VIX>VIX3M"] = _strat(spy, vixy, spy_open, vixy_open, sig_bm, vix, n, False)
-    strats["Fixed eVRP(10D)"] = _strat(spy, vixy, spy_open, vixy_open, sig_e10, vix, n, False)
-    strats["Fixed eVRP(10D)+MA30"] = _strat(spy, vixy, spy_open, vixy_open, sig_e10_m30, vix, n, False)
-    strats["Sizing eVRP(10D)"] = _strat(spy, vixy, spy_open, vixy_open, sig_e10, vix, n, True)
-    strats["Sizing eVRP(5D)+MA30"] = _strat(spy, vixy, spy_open, vixy_open, sig_e5_m30, vix, n, True)
+    strats["Benchmark VIX>VIX3M"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_bm, vix, n, False)
+    strats["Fixed eVRP(10D)"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10, vix, n, False)
+    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10_m30, vix, n, False)
+    strats["Sizing eVRP(10D)"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10, vix, n, True)
+    strats["Sizing eVRP(5D)+MA30"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e5_m30, vix, n, True)
 
     # Close-to-close strategies (Quantpedia article style)
     c2c = {}
-    c2c["100% SPY"] = strats["100% SPY"]  # same for buy-and-hold
-    c2c["Benchmark VIX>VIX3M"] = _strat_c2c(spy, vixy, sig_bm, vix, n, False)
-    c2c["Fixed eVRP(10D)"] = _strat_c2c(spy, vixy, sig_e10, vix, n, False)
-    c2c["Fixed eVRP(10D)+MA30"] = _strat_c2c(spy, vixy, sig_e10_m30, vix, n, False)
-    c2c["Sizing eVRP(10D)"] = _strat_c2c(spy, vixy, sig_e10, vix, n, True)
-    c2c["Sizing eVRP(5D)+MA30"] = _strat_c2c(spy, vixy, sig_e5_m30, vix, n, True)
-
-    # ── Current signals ──────────────────────────────────────
-    li = n - 1
-    curr = dict(
-        date=dates[li],
-        spy=round(spy[li], 2),
-        vixy=round(vixy[li], 2),
-        vix=round(vix[li], 2),
-        vix3m=round(vix3m[li], 2),
-        evrp_5d=round(evrp5[li], 2) if evrp5[li] is not None else None,
-        evrp_10d=round(evrp10[li], 2) if evrp10[li] is not None else None,
-        vix_ma30=round(ma30[li], 2) if ma30[li] is not None else None,
-        vix_ma90=round(ma90[li], 2) if ma90[li] is not None else None,
-        benchmark_on=sig_bm[li] == 1.0,
-        evrp10_on=sig_e10[li] == 1.0,
-        evrp10_ma30_on=sig_e10_m30[li] == 1.0,
-        sizing_e5_ma30_on=sig_e5_m30[li] == 1.0,
-    )
+    c2c["100% SPY"] = strats["100% SPY"]
+    c2c["Benchmark VIX>VIX3M"] = _strat_c2c(spy_close, hedge_close, sig_bm, vix, n, False)
+    c2c["Fixed eVRP(10D)"] = _strat_c2c(spy_close, hedge_close, sig_e10, vix, n, False)
+    c2c["Fixed eVRP(10D)+MA30"] = _strat_c2c(spy_close, hedge_close, sig_e10_m30, vix, n, False)
+    c2c["Sizing eVRP(10D)"] = _strat_c2c(spy_close, hedge_close, sig_e10, vix, n, True)
+    c2c["Sizing eVRP(5D)+MA30"] = _strat_c2c(spy_close, hedge_close, sig_e5_m30, vix, n, True)
 
     rnd = lambda a, d=2: [round(v, d) if v is not None else None for v in a]
     return dict(
         dates=dates,
-        spy_price=rnd(spy),
-        vixy_price=rnd(vixy),
+        spy_price=rnd(spy_close),
+        hedge_price=rnd(hedge_close),
         spy_open=rnd(spy_open),
-        vixy_open=rnd(vixy_open),
+        hedge_open=rnd(hedge_open),
         vix=rnd(vix),
         vix3m=rnd(vix3m),
         evrp_10d=rnd(evrp10),
         evrp_5d=rnd(evrp5),
         strategies=strats,
         strategies_c2c=c2c,
+    )
+
+
+def _compute():
+    """Main computation: fetch data, compute signals, run strategies."""
+    p1 = int(datetime(2007, 11, 1).timestamp())
+    p2 = int(time.time())
+
+    raw = _fetch_all(["SPY", "VIXY", "SDS", "^VIX", "^VIX3M", "^GSPC"], p1, p2)
+
+    # VIXY alignment (starts ~2011)
+    vixy_raw = {k: raw[k] for k in ["SPY", "VIXY", "^VIX", "^VIX3M", "^GSPC"]}
+    v_dates, v_cl, v_op = _align(vixy_raw)
+    if len(v_dates) < 100:
+        raise ValueError(f"Insufficient VIXY-aligned data: {len(v_dates)} days")
+    vixy_result = _build(
+        v_dates, v_cl["SPY"], v_cl["VIXY"], v_op["SPY"], v_op["VIXY"],
+        v_cl["^VIX"], v_cl["^VIX3M"], v_cl["^GSPC"],
+    )
+
+    # SDS alignment (starts ~2007-11, VIX3M inception)
+    sds_raw = {k: raw[k] for k in ["SPY", "SDS", "^VIX", "^VIX3M", "^GSPC"]}
+    s_dates, s_cl, s_op = _align(sds_raw)
+    if len(s_dates) < 100:
+        raise ValueError(f"Insufficient SDS-aligned data: {len(s_dates)} days")
+    sds_result = _build(
+        s_dates, s_cl["SPY"], s_cl["SDS"], s_op["SPY"], s_op["SDS"],
+        s_cl["^VIX"], s_cl["^VIX3M"], s_cl["^GSPC"],
+    )
+
+    # Current signals (from VIXY alignment — most recent data)
+    li = len(v_dates) - 1
+    vix_v, vix3m_v = v_cl["^VIX"], v_cl["^VIX3M"]
+    evrp5_v, evrp10_v = vixy_result["evrp_5d"], vixy_result["evrp_10d"]
+    ma30_v = _ma(vix_v, 30)
+    curr = dict(
+        date=v_dates[li],
+        spy=round(v_cl["SPY"][li], 2),
+        vixy=round(v_cl["VIXY"][li], 2),
+        vix=round(vix_v[li], 2),
+        vix3m=round(vix3m_v[li], 2),
+        evrp_5d=evrp5_v[li],
+        evrp_10d=evrp10_v[li],
+        vix_ma30=round(ma30_v[li], 2) if ma30_v[li] is not None else None,
+        benchmark_on=vix_v[li] > vix3m_v[li],
+        evrp10_on=evrp10_v[li] is not None and evrp10_v[li] <= 0,
+        evrp10_ma30_on=(
+            evrp10_v[li] is not None and evrp10_v[li] <= 0
+            and ma30_v[li] is not None and vix_v[li] > ma30_v[li]
+        ),
+        sizing_e5_ma30_on=(
+            evrp5_v[li] is not None and evrp5_v[li] <= 0
+            and ma30_v[li] is not None and vix_v[li] > ma30_v[li]
+        ),
+    )
+
+    return dict(
+        vixy=vixy_result,
+        sds=sds_result,
         current_signals=curr,
         computed_at=datetime.utcnow().isoformat() + "Z",
     )

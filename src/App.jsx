@@ -1098,11 +1098,12 @@ function VixyModelView({ data, loading, error, onRetry }) {
   const [selStrat, setSelStrat] = useState("Sizing eVRP(5D)+MA30");
   const [tf, setTf] = useState("ALL");
   const [execMode, setExecMode] = useState("REALISTIC");
+  const [instrument, setInstrument] = useState("VIXY");
 
   if (loading) return (
     <div style={{ textAlign: "center", paddingTop: 100 }}>
       <div style={{ fontSize: 12, color: T.orange, letterSpacing: 2, marginBottom: 6 }}>LOADING</div>
-      <div style={{ fontSize: 10, color: T.dim }}>Computing VIXY model from Yahoo Finance data…</div>
+      <div style={{ fontSize: 10, color: T.dim }}>Computing hedge model from Yahoo Finance data…</div>
     </div>
   );
   if (error) return (
@@ -1112,16 +1113,18 @@ function VixyModelView({ data, loading, error, onRetry }) {
         border: `1px solid ${T.border}`, background: "transparent", color: T.dim, cursor: "pointer" }}>RETRY</button>
     </div>
   );
-  if (!data?.strategies) return null;
 
-  const stratSource = execMode === "C2C" ? (data.strategies_c2c || data.strategies) : data.strategies;
+  const instData = instrument === "SDS" ? data?.sds : data?.vixy;
+  if (!instData?.strategies) return null;
+
+  const stratSource = execMode === "C2C" ? (instData.strategies_c2c || instData.strategies) : instData.strategies;
   const strat = stratSource[selStrat];
   const spy = stratSource["100% SPY"];
   if (!strat || !spy) return null;
 
   // Apply timeframe filter
   const { dates, arrays } = sliceByTf(
-    data.dates,
+    instData.dates,
     [strat.equity, spy.equity, strat.hedge_weight, strat.vixy_sleeve_equity],
     tf
   );
@@ -1146,6 +1149,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "6px 0", borderBottom: `1px solid ${T.border}`, flexWrap: "wrap", gap: 8 }}>
         <ButtonStrip label="STRATEGY" options={VIXY_STRATS.map(s => ({ value: s.key, label: s.label }))} value={selStrat} onChange={setSelStrat} />
+        <ButtonStrip label="HEDGE" options={[{value:"VIXY",label:"VIXY"},{value:"SDS",label:"SDS"}]} value={instrument} onChange={setInstrument} />
         <ButtonStrip label="EXECUTION" options={[{value:"REALISTIC",label:"REALISTIC"},{value:"C2C",label:"CLOSE-TO-CLOSE"}]} value={execMode} onChange={setExecMode} />
         <TimeframeBar value={tf} onChange={setTf} />
       </div>
@@ -1156,21 +1160,21 @@ function VixyModelView({ data, loading, error, onRetry }) {
           <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, padding: "8px 8px 0" }}>STRATEGY EQUITY CURVE</div>
           <InfoBox>
             <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
-            <span style={{ color: T.orange }}>Orange</span> = 80% SPY + dynamic VIXY hedge. <span style={{ color: T.dim }}>Grey</span> = 100% SPY buy-and-hold.
+            <span style={{ color: T.orange }}>Orange</span> = 80% SPY + dynamic {instrument} hedge. <span style={{ color: T.dim }}>Grey</span> = 100% SPY buy-and-hold.
             Strategy from <a href="https://quantpedia.com/hedging-tail-risk-with-robust-vixy-models/" target="_blank" rel="noreferrer" style={{ color: T.cyan }}>Quantpedia</a>.
           </InfoBox>
           <div style={{ background: T.bgPanel }}>
             <EquityCurveChart dates={dates} strategy={nStrat} buyHold={nSpy} height={380} />
           </div>
 
-          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, padding: "12px 8px 0" }}>DAILY VIXY ALLOCATION</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, padding: "12px 8px 0" }}>DAILY {instrument} ALLOCATION</div>
           <InfoBox>
             <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
-            Recommended portfolio weight in VIXY. Sizing mode: weight = VIX/100 when signal is active.
+            Recommended portfolio weight in {instrument}. Sizing mode: weight = VIX/100 when signal is active.
             Fixed mode: 20% when signal is active. <span style={{ color: T.orange }}>Orange area</span> = hedge on.
           </InfoBox>
           <div style={{ background: T.bgPanel }}>
-            <SimpleChart dates={dates} values={hw} color={T.orange} label="VIXY Weight"
+            <SimpleChart dates={dates} values={hw} color={T.orange} label={`${instrument} Weight`}
               yFormat={v => `${(v * 100).toFixed(1)}%`} height={220} areaFill areaBase={0} />
           </div>
         </div>
@@ -1232,10 +1236,10 @@ function VixyModelView({ data, loading, error, onRetry }) {
           </div>
 
           <div style={{ padding: "8px 8px 0" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>VIXY SLEEVE EQUITY</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>{instrument} SLEEVE EQUITY</div>
             <InfoBox>
               <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
-              Growth of $1 invested in the VIXY hedge component only. Isolates the tail-hedge contribution from core SPY.
+              Growth of $1 invested in the {instrument} hedge component only. Isolates the tail-hedge contribution from core SPY.
             </InfoBox>
             <div style={{ background: T.bgPanel }}>
               <SimpleChart dates={dates} values={slEq} color={T.cyan} label="Sleeve"
@@ -1250,13 +1254,13 @@ function VixyModelView({ data, loading, error, onRetry }) {
             </div>
             <InfoBox>
               <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
-              Each row is a hedge on/off transition. ENTER = signal turned on ({execMode === "C2C" ? "buy VIXY at close" : "buy VIXY at open"}). EXIT = signal turned off ({execMode === "C2C" ? "sell VIXY at close" : "sell VIXY at open"}).
+              Each row is a hedge on/off transition. ENTER = signal turned on ({execMode === "C2C" ? `buy ${instrument} at close` : `buy ${instrument} at open`}). EXIT = signal turned off ({execMode === "C2C" ? `sell ${instrument} at close` : `sell ${instrument} at open`}).
             </InfoBox>
             <div style={{ maxHeight: 220, overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                    {["DATE", "ACTION", "VIXY WT", execMode === "C2C" ? "SPY CLOSE" : "SPY OPEN", execMode === "C2C" ? "VIXY CLOSE" : "VIXY OPEN"].map(h => (
+                    {["DATE", "ACTION", `${instrument} WT`, execMode === "C2C" ? "SPY CLOSE" : "SPY OPEN", execMode === "C2C" ? `${instrument} CLOSE` : `${instrument} OPEN`].map(h => (
                       <th key={h} style={{ padding: "5px 4px", textAlign: h === "DATE" || h === "ACTION" ? "left" : "right",
                         color: T.dim, fontWeight: 600, letterSpacing: 0.5,
                         position: "sticky", top: 0, background: T.bg, zIndex: 1 }}>{h}</th>
@@ -1268,7 +1272,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
                     const cutoff2y = new Date();
                     cutoff2y.setFullYear(cutoff2y.getFullYear() - 2);
                     const cutStr = cutoff2y.toISOString().split("T")[0];
-                    const fullDates = data.dates;
+                    const fullDates = instData.dates;
                     const fullHw = strat.hedge_weight;
                     const txns = [];
                     const useOpen = execMode !== "C2C";
@@ -1276,8 +1280,8 @@ function VixyModelView({ data, loading, error, onRetry }) {
                       if (fullDates[i] < cutStr) continue;
                       const prev = fullHw[i - 1] > 0;
                       const curr = fullHw[i] > 0;
-                      if (curr && !prev) txns.push({ date: fullDates[i], action: "ENTER", weight: fullHw[i], spy: useOpen ? data.spy_open?.[i] : data.spy_price?.[i], vixy: useOpen ? data.vixy_open?.[i] : data.vixy_price?.[i] });
-                      else if (!curr && prev) txns.push({ date: fullDates[i], action: "EXIT", weight: 0, spy: useOpen ? data.spy_open?.[i] : data.spy_price?.[i], vixy: useOpen ? data.vixy_open?.[i] : data.vixy_price?.[i] });
+                      if (curr && !prev) txns.push({ date: fullDates[i], action: "ENTER", weight: fullHw[i], spy: useOpen ? instData.spy_open?.[i] : instData.spy_price?.[i], hedge: useOpen ? instData.hedge_open?.[i] : instData.hedge_price?.[i] });
+                      else if (!curr && prev) txns.push({ date: fullDates[i], action: "EXIT", weight: 0, spy: useOpen ? instData.spy_open?.[i] : instData.spy_price?.[i], hedge: useOpen ? instData.hedge_open?.[i] : instData.hedge_price?.[i] });
                     }
                     return txns.reverse().map((t, i) => (
                       <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
@@ -1285,7 +1289,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
                         <td style={{ padding: "4px 4px", color: t.action === "ENTER" ? T.green : T.red, fontWeight: 600 }}>{t.action}</td>
                         <td style={{ padding: "4px 4px", textAlign: "right", color: T.orange }}>{(t.weight * 100).toFixed(1)}%</td>
                         <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.spy}</td>
-                        <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.vixy}</td>
+                        <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.hedge}</td>
                       </tr>
                     ));
                   })()}
