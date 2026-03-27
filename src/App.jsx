@@ -1114,7 +1114,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
     </div>
   );
 
-  const instData = instrument === "SDS" ? data?.sds : data?.vixy;
+  const instData = instrument === "SDS" ? data?.sds : instrument === "TZA" ? data?.tza : data?.vixy;
   if (!instData?.strategies) return null;
 
   const stratSource = execMode === "C2C" ? (instData.strategies_c2c || instData.strategies) : instData.strategies;
@@ -1149,7 +1149,7 @@ function VixyModelView({ data, loading, error, onRetry }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "6px 0", borderBottom: `1px solid ${T.border}`, flexWrap: "wrap", gap: 8 }}>
         <ButtonStrip label="STRATEGY" options={VIXY_STRATS.map(s => ({ value: s.key, label: s.label }))} value={selStrat} onChange={setSelStrat} />
-        <ButtonStrip label="HEDGE" options={[{value:"VIXY",label:"VIXY"},{value:"SDS",label:"SDS"}]} value={instrument} onChange={setInstrument} />
+        <ButtonStrip label="HEDGE" options={[{value:"VIXY",label:"VIXY"},{value:"SDS",label:"SDS"},{value:"TZA",label:"TZA"}]} value={instrument} onChange={setInstrument} />
         <ButtonStrip label="EXECUTION" options={[{value:"REALISTIC",label:"REALISTIC"},{value:"C2C",label:"CLOSE-TO-CLOSE"}]} value={execMode} onChange={setExecMode} />
         <TimeframeBar value={tf} onChange={setTf} />
       </div>

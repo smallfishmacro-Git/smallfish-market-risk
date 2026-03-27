@@ -321,7 +321,7 @@ def _compute():
     p1 = int(datetime(2007, 11, 1).timestamp())
     p2 = int(time.time())
 
-    raw = _fetch_all(["SPY", "VIXY", "SDS", "^VIX", "^VIX3M", "^GSPC"], p1, p2)
+    raw = _fetch_all(["SPY", "VIXY", "SDS", "TZA", "^VIX", "^VIX3M", "^GSPC"], p1, p2)
 
     # VIXY alignment (starts ~2011)
     vixy_raw = {k: raw[k] for k in ["SPY", "VIXY", "^VIX", "^VIX3M", "^GSPC"]}
@@ -341,6 +341,16 @@ def _compute():
     sds_result = _build(
         s_dates, s_cl["SPY"], s_cl["SDS"], s_op["SPY"], s_op["SDS"],
         s_cl["^VIX"], s_cl["^VIX3M"], s_cl["^GSPC"],
+    )
+
+    # TZA alignment (starts ~2008-11)
+    tza_raw = {k: raw[k] for k in ["SPY", "TZA", "^VIX", "^VIX3M", "^GSPC"]}
+    t_dates, t_cl, t_op = _align(tza_raw)
+    if len(t_dates) < 100:
+        raise ValueError(f"Insufficient TZA-aligned data: {len(t_dates)} days")
+    tza_result = _build(
+        t_dates, t_cl["SPY"], t_cl["TZA"], t_op["SPY"], t_op["TZA"],
+        t_cl["^VIX"], t_cl["^VIX3M"], t_cl["^GSPC"],
     )
 
     # Current signals (from VIXY alignment — most recent data)
@@ -372,6 +382,7 @@ def _compute():
     return dict(
         vixy=vixy_result,
         sds=sds_result,
+        tza=tza_result,
         current_signals=curr,
         computed_at=datetime.utcnow().isoformat() + "Z",
     )
