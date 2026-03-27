@@ -656,6 +656,109 @@ function EquityCurveChart({ dates, strategy, buyHold, height = 480 }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SimpleChart — generic time series (line + optional area fill)
+// ═══════════════════════════════════════════════════════════════
+function SimpleChart({ dates, values, color = T.orange, label = "", yFormat = (v) => v.toFixed(2), height = 220, areaFill = false, areaBase = null }) {
+  const ref = useRef(null);
+  const [hover, setHover] = useState(null);
+  const [W, setW] = useState(600);
+  const [zoomStart, setZoomStart] = useState(0);
+  const [zoomEnd, setZoomEnd] = useState(dates.length);
+
+  useEffect(() => { setZoomStart(0); setZoomEnd(dates.length); }, [dates.length]);
+  useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver((e) => { const w = e[0].contentRect.width; if (w > 0) setW(w); });
+    ro.observe(ref.current); return () => ro.disconnect();
+  }, []);
+
+  const totalN = dates.length;
+  if (totalN < 2) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
+
+  const zs = Math.max(0, Math.min(zoomStart, totalN - 2));
+  const ze = Math.max(zs + 2, Math.min(zoomEnd, totalN));
+  const zDates = dates.slice(zs, ze);
+  const zVals = values.slice(zs, ze);
+  const n = zDates.length;
+
+  const pad = { l: 52, r: 8, t: 10, b: 20 };
+  const plotH = height - pad.t - pad.b;
+  const timestamps = datesToTimestamps(zDates);
+  const xS = makeTimeXScale(timestamps, pad.l, pad.r, W);
+
+  const valid = zVals.filter(v => v != null && isFinite(v));
+  if (valid.length < 1) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
+  const mn = areaBase != null ? Math.min(areaBase, Math.min(...valid)) : Math.min(...valid) * 0.98;
+  const mx = Math.max(...valid) * 1.02;
+  const range = mx - mn || 1;
+  const yS = (v) => (v == null || !isFinite(v)) ? null : pad.t + plotH - ((v - mn) / range) * plotH;
+
+  let linePath = "";
+  for (let i = 0; i < n; i++) {
+    const y = yS(zVals[i]);
+    if (y == null) continue;
+    linePath += (linePath ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+  }
+
+  let aP = "";
+  if (areaFill) {
+    const base = yS(areaBase != null ? areaBase : mn);
+    if (base != null) {
+      let started = false;
+      for (let i = 0; i < n; i++) {
+        const y = yS(zVals[i]);
+        if (y == null) continue;
+        if (!started) { aP = `M${xS(timestamps[i]).toFixed(1)},${base.toFixed(1)}`; started = true; }
+        aP += `L${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+      }
+      if (started) aP += `L${xS(timestamps[n - 1]).toFixed(1)},${base.toFixed(1)}Z`;
+    }
+  }
+
+  const yTicks = [mn, (mn + mx) / 2, mx].map(v => ({ y: yS(v), label: yFormat(v) }));
+  const dateLbls = [];
+  const step = Math.max(1, Math.floor(n / 6));
+  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(timestamps[i]), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+
+  const handleMouse = (e) => {
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    const mouseX = e.clientX - r.left;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < n; i++) { const d = Math.abs(xS(timestamps[i]) - mouseX); if (d < bd) { bd = d; bi = i; } }
+    setHover(bi);
+  };
+  const hx = hover != null ? xS(timestamps[hover]) : null;
+
+  return (
+    <div>
+      <div ref={ref} style={{ position: "relative", width: "100%" }} onMouseMove={handleMouse} onMouseLeave={() => setHover(null)}>
+        <svg width={W} height={height} style={{ display: "block" }}>
+          {yTicks.map((l, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
+          {areaFill && aP && <path d={aP} fill={`${color}15`} />}
+          <path d={linePath} fill="none" stroke={color} strokeWidth={1.2} />
+          {yTicks.map((l, i) => <text key={`t${i}`} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
+          {dateLbls.map((l, i) => <text key={`d${i}`} x={l.x} y={height - 4} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
+          {hover != null && <>
+            <line x1={hx} x2={hx} y1={pad.t} y2={height - pad.b} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
+            {yS(zVals[hover]) != null && <circle cx={hx} cy={yS(zVals[hover])} r={2.5} fill={color} stroke={T.bg} strokeWidth={1} />}
+          </>}
+        </svg>
+        {hover != null && zVals[hover] != null && (
+          <div style={{ position: "absolute", left: Math.min(hx + 10, W - 160), top: pad.t,
+            background: "rgba(10,10,12,0.94)", border: `1px solid ${T.borderBright}`,
+            padding: "5px 8px", pointerEvents: "none", zIndex: 10, fontFamily: T.font, fontSize: 9, lineHeight: 1.5 }}>
+            <div style={{ color: T.dim }}>{zDates[hover]}</div>
+            <div style={{ color }}>{label}: {yFormat(zVals[hover])}</div>
+          </div>
+        )}
+      </div>
+      <ZoomSlider totalLength={totalN} zoomStart={zoomStart} zoomEnd={zoomEnd}
+        onChange={(s, e) => { setZoomStart(s); setZoomEnd(e); }} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Backtest computation
 // ═══════════════════════════════════════════════════════════════
 const BT_HORIZONS = [
@@ -981,6 +1084,168 @@ function BacktestView({ data }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// VIXY Model — Quantpedia tail-hedge strategy
+// ═══════════════════════════════════════════════════════════════
+const VIXY_STRATS = [
+  { key: "Sizing eVRP(5D)+MA30", label: "SZ 5D+MA" },
+  { key: "Sizing eVRP(10D)", label: "SZ 10D" },
+  { key: "Fixed eVRP(10D)+MA30", label: "FX 10D+MA" },
+  { key: "Fixed eVRP(10D)", label: "FX 10D" },
+  { key: "Benchmark VIX>VIX3M", label: "VIX>3M" },
+];
+
+function VixyModelView({ data, loading, error, onRetry }) {
+  const [selStrat, setSelStrat] = useState("Sizing eVRP(5D)+MA30");
+  const [tf, setTf] = useState("ALL");
+
+  if (loading) return (
+    <div style={{ textAlign: "center", paddingTop: 100 }}>
+      <div style={{ fontSize: 12, color: T.orange, letterSpacing: 2, marginBottom: 6 }}>LOADING</div>
+      <div style={{ fontSize: 10, color: T.dim }}>Computing VIXY model from Yahoo Finance data…</div>
+    </div>
+  );
+  if (error) return (
+    <div style={{ textAlign: "center", paddingTop: 100 }}>
+      <div style={{ fontSize: 12, color: T.red, marginBottom: 8 }}>ERROR: {error}</div>
+      <button onClick={onRetry} style={{ padding: "4px 14px", fontSize: 10, fontFamily: T.font,
+        border: `1px solid ${T.border}`, background: "transparent", color: T.dim, cursor: "pointer" }}>RETRY</button>
+    </div>
+  );
+  if (!data?.strategies) return null;
+
+  const strat = data.strategies[selStrat];
+  const spy = data.strategies["100% SPY"];
+  if (!strat || !spy) return null;
+
+  // Apply timeframe filter
+  const { dates, arrays } = sliceByTf(
+    data.dates,
+    [strat.equity, spy.equity, strat.hedge_weight, strat.vixy_sleeve_equity],
+    tf
+  );
+  const [sEq, spyEq, hw, slEq] = arrays;
+
+  // Normalize equity to start at 100 from visible window
+  const norm = (arr) => { const b = arr[0] || 1; return arr.map(v => v / b * 100); };
+  const nStrat = norm(sEq);
+  const nSpy = norm(spyEq);
+
+  const cs = data.current_signals || {};
+  const latestWeight = hw.length > 0 ? hw[hw.length - 1] : 0;
+  const hedgeOn =
+    selStrat.includes("Benchmark") ? cs.benchmark_on :
+    selStrat === "Sizing eVRP(5D)+MA30" ? cs.sizing_e5_ma30_on :
+    selStrat.includes("MA30") ? cs.evrp10_ma30_on :
+    cs.evrp10_on;
+
+  return (
+    <>
+      {/* Controls */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "6px 0", borderBottom: `1px solid ${T.border}`, flexWrap: "wrap", gap: 8 }}>
+        <ButtonStrip label="STRATEGY" options={VIXY_STRATS.map(s => ({ value: s.key, label: s.label }))} value={selStrat} onChange={setSelStrat} />
+        <TimeframeBar value={tf} onChange={setTf} />
+      </div>
+
+      <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
+        {/* LEFT: Charts */}
+        <div style={{ flex: "1 1 55%", minWidth: 0, borderRight: `1px solid ${T.border}`, overflow: "auto" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, padding: "8px 8px 0" }}>STRATEGY EQUITY CURVE</div>
+          <InfoBox>
+            <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+            <span style={{ color: T.orange }}>Orange</span> = 80% SPY + dynamic VIXY hedge. <span style={{ color: T.dim }}>Grey</span> = 100% SPY buy-and-hold.
+            Strategy from <a href="https://quantpedia.com/hedging-tail-risk-with-robust-vixy-models/" target="_blank" rel="noreferrer" style={{ color: T.cyan }}>Quantpedia</a>.
+          </InfoBox>
+          <div style={{ background: T.bgPanel }}>
+            <EquityCurveChart dates={dates} strategy={nStrat} buyHold={nSpy} height={380} />
+          </div>
+
+          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, padding: "12px 8px 0" }}>DAILY VIXY ALLOCATION</div>
+          <InfoBox>
+            <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+            Recommended portfolio weight in VIXY. Sizing mode: weight = VIX/100 when signal is active.
+            Fixed mode: 20% when signal is active. <span style={{ color: T.orange }}>Orange area</span> = hedge on.
+          </InfoBox>
+          <div style={{ background: T.bgPanel }}>
+            <SimpleChart dates={dates} values={hw} color={T.orange} label="VIXY Weight"
+              yFormat={v => `${(v * 100).toFixed(1)}%`} height={220} areaFill areaBase={0} />
+          </div>
+        </div>
+
+        {/* RIGHT: Signals + Stats + Sleeve */}
+        <div style={{ flex: "1 1 45%", minWidth: 0, overflow: "auto" }}>
+          <div style={{ padding: "8px 8px 4px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>CURRENT SIGNALS</div>
+            <div style={{ display: "flex", gap: 2, marginBottom: 2 }}>
+              <StatCell label="VIX" value={cs.vix} color={T.bright} />
+              <StatCell label="VIX3M" value={cs.vix3m} color={T.bright} />
+              <StatCell label="eVRP 5D" value={cs.evrp_5d} color={cs.evrp_5d != null && cs.evrp_5d <= 0 ? T.red : T.green} />
+              <StatCell label="eVRP 10D" value={cs.evrp_10d} color={cs.evrp_10d != null && cs.evrp_10d <= 0 ? T.red : T.green} />
+            </div>
+            <div style={{ display: "flex", gap: 2, marginBottom: 2 }}>
+              <StatCell label="VIX MA30" value={cs.vix_ma30} color={T.bright} />
+              <StatCell label="HEDGE ON" value={hedgeOn ? "YES" : "NO"} color={hedgeOn ? T.green : T.dim} />
+              <StatCell label="REC. WEIGHT" value={`${(latestWeight * 100).toFixed(1)}%`} color={latestWeight > 0 ? T.orange : T.dim} />
+              <StatCell label="AS OF" value={cs.date} color={T.dim} />
+            </div>
+          </div>
+
+          <div style={{ padding: "8px 8px 4px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>STRATEGY COMPARISON</div>
+            <InfoBox>
+              <span style={{ color: T.orange, fontWeight: 600 }}>Reading the table: </span>
+              Click any row to switch charts. eVRP = implied vol − realized vol. Signal fires when eVRP ≤ 0.
+              MA filter adds VIX &gt; 30D average. Sizing = VIX/100 weight instead of fixed 20%.
+            </InfoBox>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                  {["STRATEGY", "CAGR", "VOL", "SHARPE", "MAX DD"].map(h => (
+                    <th key={h} style={{ padding: "5px 4px", textAlign: h === "STRATEGY" ? "left" : "right",
+                      color: T.dim, fontWeight: 600, letterSpacing: 0.5 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[{ key: "100% SPY", label: "100% SPY" }, ...VIXY_STRATS].map(({ key, label }) => {
+                  const st = data.strategies[key]?.stats;
+                  if (!st) return null;
+                  const active = key === selStrat;
+                  return (
+                    <tr key={key} onClick={() => key !== "100% SPY" && setSelStrat(key)}
+                      style={{ borderBottom: `1px solid ${T.border}`,
+                        background: active ? `${T.orange}11` : "transparent",
+                        cursor: key !== "100% SPY" ? "pointer" : "default" }}>
+                      <td style={{ padding: "4px 4px", color: active ? T.orange : T.text }}>{label}</td>
+                      <td style={{ padding: "4px 4px", textAlign: "right", color: st.cagr >= 0 ? T.green : T.red }}>{st.cagr.toFixed(1)}%</td>
+                      <td style={{ padding: "4px 4px", textAlign: "right", color: T.text }}>{st.vol.toFixed(1)}%</td>
+                      <td style={{ padding: "4px 4px", textAlign: "right", color: st.sharpe >= 0.5 ? T.green : T.text }}>{st.sharpe.toFixed(2)}</td>
+                      <td style={{ padding: "4px 4px", textAlign: "right", color: T.red }}>-{st.max_dd.toFixed(1)}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ padding: "8px 8px 0" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>VIXY SLEEVE EQUITY</div>
+            <InfoBox>
+              <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+              Growth of $1 invested in the VIXY hedge component only. Isolates the tail-hedge contribution from core SPY.
+            </InfoBox>
+            <div style={{ background: T.bgPanel }}>
+              <SimpleChart dates={dates} values={slEq} color={T.cyan} label="Sleeve"
+                yFormat={v => `$${v.toFixed(3)}`} height={200} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Main App
 // ═══════════════════════════════════════════════════════════════
 export default function App() {
@@ -989,6 +1254,10 @@ export default function App() {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [subTab, setSubTab] = useState("COMPOSITE SIGNAL");
+  const [vixyData, setVixyData] = useState(null);
+  const [vixyLoading, setVixyLoading] = useState(false);
+  const [vixyError, setVixyError] = useState(null);
+  const vixyFetched = useRef(false);
 
   const loadData = useCallback(async () => {
     try { setLoading(true); setError(null); const d = await fetchData(); setData(d); }
@@ -997,6 +1266,20 @@ export default function App() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const loadVixy = useCallback(async () => {
+    if (vixyFetched.current) return;
+    vixyFetched.current = true;
+    try {
+      setVixyLoading(true); setVixyError(null);
+      const res = await fetch("/api/vixy");
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      setVixyData(await res.json());
+    } catch (e) { setVixyError(e.message); vixyFetched.current = false; }
+    finally { setVixyLoading(false); }
+  }, []);
+
+  useEffect(() => { if (subTab === "VIXY MODEL") loadVixy(); }, [subTab, loadVixy]);
 
   const m = data?.metrics || {};
   const fetchedAt = data?.computedAt;
@@ -1028,7 +1311,7 @@ export default function App() {
             </div>
           )}
         </div>
-        <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST"]} active={subTab} onChange={setSubTab} />
+        <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL"]} active={subTab} onChange={setSubTab} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>{content}</div>
       </div>
       <div style={{ textAlign: "center", padding: "10px 0", borderTop: `1px solid ${T.border}` }}>
@@ -1053,6 +1336,9 @@ export default function App() {
   return shell(
     subTab === "COMPOSITE SIGNAL"
       ? <CompositeSignalView data={data} />
-      : <BacktestView data={data} />
+      : subTab === "BACKTEST"
+      ? <BacktestView data={data} />
+      : <VixyModelView data={vixyData} loading={vixyLoading} error={vixyError}
+          onRetry={() => { vixyFetched.current = false; loadVixy(); }} />
   );
 }
