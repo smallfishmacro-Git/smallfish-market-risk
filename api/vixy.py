@@ -78,10 +78,16 @@ def _align(raw):
 
 
 def _ret(prices):
-    """Daily percentage returns."""
+    """Daily log returns (used for realized vol calculation).
+
+    Log returns are the standard for annualised realized volatility and match
+    TradingView's ``math.log(close / close[1])`` exactly.  The previous
+    version used simple percentage returns which produced slightly different
+    eVRP values on borderline days, causing signal divergence vs. TV.
+    """
     r = [0.0]
     for i in range(1, len(prices)):
-        r.append((prices[i] / prices[i - 1] - 1) if prices[i - 1] > 0 else 0.0)
+        r.append(math.log(prices[i] / prices[i - 1]) if prices[i - 1] > 0 else 0.0)
     return r
 
 
@@ -249,10 +255,29 @@ def _build(dates, spy_close, hedge_close, spy_open, hedge_open, vix, vix3m, gspc
     evrp10 = [None if rv10[i] is None else vix[i] - rv10[i] for i in range(n)]
 
     # ── Signals ──────────────────────────────────────────────
+    # Benchmark: VIX term structure only (no eVRP)
     sig_bm = [1.0 if vix[i] > vix3m[i] else 0.0 for i in range(n)]
+
+    # eVRP-only (no filter)
     sig_e10 = [
         1.0 if evrp10[i] is not None and evrp10[i] <= 0 else 0.0 for i in range(n)
     ]
+
+    # eVRP + VIX3M  (Article baseline: Strategies I & II)
+    sig_e5_vix3m = [
+        1.0
+        if (evrp5[i] is not None and evrp5[i] <= 0 and vix[i] > vix3m[i])
+        else 0.0
+        for i in range(n)
+    ]
+    sig_e10_vix3m = [
+        1.0
+        if (evrp10[i] is not None and evrp10[i] <= 0 and vix[i] > vix3m[i])
+        else 0.0
+        for i in range(n)
+    ]
+
+    # eVRP + MA30  (Sensitivity variants)
     sig_e10_m30 = [
         1.0
         if (evrp10[i] is not None and evrp10[i] <= 0
@@ -286,19 +311,37 @@ def _build(dates, spy_close, hedge_close, spy_open, hedge_open, vix, vix3m, gspc
     )
 
     strats["Benchmark VIX>VIX3M"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_bm, vix, n, False)
-    strats["Fixed eVRP(10D)"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10, vix, n, False)
-    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10_m30, vix, n, False)
-    strats["Sizing eVRP(10D)"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10, vix, n, True)
+
+    # Article baseline: eVRP + VIX3M
+    strats["Fixed eVRP(5D)+VIX3M"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e5_vix3m, vix, n, False)
+    strats["Sizing eVRP(5D)+VIX3M"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e5_vix3m, vix, n, True)
+    strats["Fixed eVRP(10D)+VIX3M"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10_vix3m, vix, n, False)
+    strats["Sizing eVRP(10D)+VIX3M"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10_vix3m, vix, n, True)
+
+    # Sensitivity: eVRP + MA30
+    strats["Fixed eVRP(5D)+MA30"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e5_m30, vix, n, False)
     strats["Sizing eVRP(5D)+MA30"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e5_m30, vix, n, True)
+    strats["Fixed eVRP(10D)+MA30"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10_m30, vix, n, False)
+    strats["Sizing eVRP(10D)+MA30"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10_m30, vix, n, True)
+
+    # eVRP-only (no filter)
+    strats["Fixed eVRP(10D)"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10, vix, n, False)
+    strats["Sizing eVRP(10D)"] = _strat(spy_close, hedge_close, spy_open, hedge_open, sig_e10, vix, n, True)
 
     # Close-to-close strategies (Quantpedia article style)
     c2c = {}
     c2c["100% SPY"] = strats["100% SPY"]
     c2c["Benchmark VIX>VIX3M"] = _strat_c2c(spy_close, hedge_close, sig_bm, vix, n, False)
-    c2c["Fixed eVRP(10D)"] = _strat_c2c(spy_close, hedge_close, sig_e10, vix, n, False)
-    c2c["Fixed eVRP(10D)+MA30"] = _strat_c2c(spy_close, hedge_close, sig_e10_m30, vix, n, False)
-    c2c["Sizing eVRP(10D)"] = _strat_c2c(spy_close, hedge_close, sig_e10, vix, n, True)
+    c2c["Fixed eVRP(5D)+VIX3M"] = _strat_c2c(spy_close, hedge_close, sig_e5_vix3m, vix, n, False)
+    c2c["Sizing eVRP(5D)+VIX3M"] = _strat_c2c(spy_close, hedge_close, sig_e5_vix3m, vix, n, True)
+    c2c["Fixed eVRP(10D)+VIX3M"] = _strat_c2c(spy_close, hedge_close, sig_e10_vix3m, vix, n, False)
+    c2c["Sizing eVRP(10D)+VIX3M"] = _strat_c2c(spy_close, hedge_close, sig_e10_vix3m, vix, n, True)
+    c2c["Fixed eVRP(5D)+MA30"] = _strat_c2c(spy_close, hedge_close, sig_e5_m30, vix, n, False)
     c2c["Sizing eVRP(5D)+MA30"] = _strat_c2c(spy_close, hedge_close, sig_e5_m30, vix, n, True)
+    c2c["Fixed eVRP(10D)+MA30"] = _strat_c2c(spy_close, hedge_close, sig_e10_m30, vix, n, False)
+    c2c["Sizing eVRP(10D)+MA30"] = _strat_c2c(spy_close, hedge_close, sig_e10_m30, vix, n, True)
+    c2c["Fixed eVRP(10D)"] = _strat_c2c(spy_close, hedge_close, sig_e10, vix, n, False)
+    c2c["Sizing eVRP(10D)"] = _strat_c2c(spy_close, hedge_close, sig_e10, vix, n, True)
 
     rnd = lambda a, d=2: [round(v, d) if v is not None else None for v in a]
     return dict(
@@ -374,6 +417,19 @@ def _compute():
             and ma30_v[li] is not None and vix_v[li] > ma30_v[li]
         ),
         sizing_e5_ma30_on=(
+            evrp5_v[li] is not None and evrp5_v[li] <= 0
+            and ma30_v[li] is not None and vix_v[li] > ma30_v[li]
+        ),
+        # Article baseline: eVRP + VIX3M
+        e5_vix3m_on=(
+            evrp5_v[li] is not None and evrp5_v[li] <= 0
+            and vix_v[li] > vix3m_v[li]
+        ),
+        e10_vix3m_on=(
+            evrp10_v[li] is not None and evrp10_v[li] <= 0
+            and vix_v[li] > vix3m_v[li]
+        ),
+        e5_ma30_on=(
             evrp5_v[li] is not None and evrp5_v[li] <= 0
             and ma30_v[li] is not None and vix_v[li] > ma30_v[li]
         ),

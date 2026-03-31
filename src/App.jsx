@@ -1087,15 +1087,24 @@ function BacktestView({ data }) {
 // VIXY Model — Quantpedia tail-hedge strategy
 // ═══════════════════════════════════════════════════════════════
 const VIXY_STRATS = [
+  // Article baselines (eVRP + VIX3M)
+  { key: "Sizing eVRP(5D)+VIX3M", label: "SZ 5D+VIX3M" },
+  { key: "Fixed eVRP(5D)+VIX3M", label: "FX 5D+VIX3M" },
+  { key: "Sizing eVRP(10D)+VIX3M", label: "SZ 10D+VIX3M" },
+  { key: "Fixed eVRP(10D)+VIX3M", label: "FX 10D+VIX3M" },
+  // Sensitivity variants (eVRP + MA30)
   { key: "Sizing eVRP(5D)+MA30", label: "SZ 5D+MA" },
-  { key: "Sizing eVRP(10D)", label: "SZ 10D" },
+  { key: "Fixed eVRP(5D)+MA30", label: "FX 5D+MA" },
+  { key: "Sizing eVRP(10D)+MA30", label: "SZ 10D+MA" },
   { key: "Fixed eVRP(10D)+MA30", label: "FX 10D+MA" },
+  // eVRP-only and benchmark
+  { key: "Sizing eVRP(10D)", label: "SZ 10D" },
   { key: "Fixed eVRP(10D)", label: "FX 10D" },
   { key: "Benchmark VIX>VIX3M", label: "VIX>3M" },
 ];
 
 function VixyModelView({ data, loading, error, onRetry }) {
-  const [selStrat, setSelStrat] = useState("Sizing eVRP(5D)+MA30");
+  const [selStrat, setSelStrat] = useState("Sizing eVRP(5D)+VIX3M");
   const [tf, setTf] = useState("ALL");
   const [execMode, setExecMode] = useState("REALISTIC");
   const [instrument, setInstrument] = useState("VIXY");
@@ -1139,8 +1148,13 @@ function VixyModelView({ data, loading, error, onRetry }) {
   const latestWeight = hw.length > 0 ? hw[hw.length - 1] : 0;
   const hedgeOn =
     selStrat.includes("Benchmark") ? cs.benchmark_on :
-    selStrat === "Sizing eVRP(5D)+MA30" ? cs.sizing_e5_ma30_on :
-    selStrat.includes("MA30") ? cs.evrp10_ma30_on :
+    // Article baselines: eVRP + VIX3M
+    selStrat.includes("5D") && selStrat.includes("VIX3M") ? cs.e5_vix3m_on :
+    selStrat.includes("10D") && selStrat.includes("VIX3M") ? cs.e10_vix3m_on :
+    // Sensitivity: eVRP + MA30
+    selStrat.includes("5D") && selStrat.includes("MA30") ? cs.e5_ma30_on :
+    selStrat.includes("10D") && selStrat.includes("MA30") ? cs.evrp10_ma30_on :
+    // eVRP-only
     cs.evrp10_on;
 
   return (
@@ -1201,8 +1215,8 @@ function VixyModelView({ data, loading, error, onRetry }) {
             <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>STRATEGY COMPARISON</div>
             <InfoBox>
               <span style={{ color: T.orange, fontWeight: 600 }}>Reading the table: </span>
-              Click any row to switch charts. eVRP = implied vol − realized vol. Signal fires when eVRP ≤ 0.
-              MA filter adds VIX &gt; 30D average. Sizing = VIX/100 weight instead of fixed 20%.
+              Click any row to switch charts. eVRP = implied vol − realized vol (log returns). Signal fires when eVRP ≤ 0.
+              VIX3M filter: VIX &gt; CBOE VIX3M (article baseline). MA filter: VIX &gt; 30D SMA. Sizing = VIX/100 weight instead of fixed 20%.
             </InfoBox>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
               <thead>
