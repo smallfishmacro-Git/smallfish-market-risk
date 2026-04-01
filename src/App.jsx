@@ -216,18 +216,12 @@ function ZoomSlider({ totalLength, zoomStart, zoomEnd, onChange }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Helpers: convert dates array to timestamps for time-based x
+// Helpers: index-based x scale (no weekend/holiday gaps)
 // ═══════════════════════════════════════════════════════════════
-function datesToTimestamps(dates) {
-  return dates.map((d) => new Date(d).getTime());
-}
-
-function makeTimeXScale(timestamps, padL, padR, W) {
-  const tMin = timestamps[0];
-  const tMax = timestamps[timestamps.length - 1];
-  const range = tMax - tMin || 1;
+function makeIndexXScale(n, padL, padR, W) {
   const plotW = W - padL - padR;
-  return (ts) => padL + ((ts - tMin) / range) * plotW;
+  const maxIdx = n - 1 || 1;
+  return (i) => padL + (i / maxIdx) * plotW;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -300,9 +294,8 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
   const topH = hasInd ? Math.floor((height - pad.t - pad.mid - pad.b) * 0.6) : height - pad.t - pad.b;
   const botH = hasInd ? height - pad.t - topH - pad.mid - pad.b : 0;
 
-  // Time-based x scale
-  const timestamps = datesToTimestamps(zDates);
-  const xS = makeTimeXScale(timestamps, pad.l, pad.r, W);
+  // Index-based x scale (no weekend/holiday gaps)
+  const xS = makeIndexXScale(n, pad.l, pad.r, W);
 
   // SPX log scale
   const spxV = zSpx.filter((v) => v > 0);
@@ -318,8 +311,8 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
     let curRegime = zTrend[0];
     for (let i = 1; i <= n; i++) {
       if (i === n || zTrend[i] !== curRegime) {
-        const x1 = xS(timestamps[startIdx]);
-        const x2 = i < n ? xS(timestamps[i]) : xS(timestamps[n - 1]);
+        const x1 = xS(startIdx);
+        const x2 = i < n ? xS(i) : xS(n - 1);
         bands.push({
           x: x1, width: Math.max(0, x2 - x1),
           color: curRegime === 1 ? T.green : T.red,
@@ -339,7 +332,7 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
   for (let i = 0; i < n; i++) {
     const y = ySpx(zSpx[i]);
     if (y == null) continue;
-    pricePath += (pricePath ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+    pricePath += (pricePath ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`;
   }
 
   // Indicator bottom panel
@@ -356,7 +349,7 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
     for (let i = 0; i < n; i++) {
       const y = yInd(zIndicator[i]);
       if (y == null) continue;
-      indPath += (indPath ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+      indPath += (indPath ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`;
     }
   }
 
@@ -366,7 +359,7 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
   }));
   const dateLbls = [];
   const step = Math.max(1, Math.floor(n / 6));
-  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(timestamps[i]), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(i), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
 
   const handleMouse = (e) => {
     const r = ref.current?.getBoundingClientRect(); if (!r) return;
@@ -374,12 +367,12 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
     // Find closest data point by x position
     let bestIdx = 0, bestDist = Infinity;
     for (let i = 0; i < n; i++) {
-      const dist = Math.abs(xS(timestamps[i]) - mouseX);
+      const dist = Math.abs(xS(i) - mouseX);
       if (dist < bestDist) { bestDist = dist; bestIdx = i; }
     }
     setHover(bestIdx);
   };
-  const hx = hover != null ? xS(timestamps[hover]) : null;
+  const hx = hover != null ? xS(hover) : null;
 
   return (
     <div>
@@ -521,9 +514,8 @@ function EquityCurveChart({ dates, strategy, buyHold, height = 480 }) {
   const eqH = Math.floor((height - pad.t - pad.mid - pad.b) * 0.65);
   const ddH = height - pad.t - eqH - pad.mid - pad.b;
 
-  // Time-based x
-  const timestamps = datesToTimestamps(zDates);
-  const xS = makeTimeXScale(timestamps, pad.l, pad.r, W);
+  // Index-based x (no weekend/holiday gaps)
+  const xS = makeIndexXScale(n, pad.l, pad.r, W);
 
   // Equity y scale
   const allVals = [...zStrategy, ...zBuyHold].filter((v) => v != null && isFinite(v));
@@ -555,7 +547,7 @@ function EquityCurveChart({ dates, strategy, buyHold, height = 480 }) {
     for (let i = 0; i < n; i++) {
       const y = yFn(vals[i]);
       if (y == null) continue;
-      p += (p ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+      p += (p ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`;
     }
     return p;
   };
@@ -566,7 +558,7 @@ function EquityCurveChart({ dates, strategy, buyHold, height = 480 }) {
     for (let i = 0; i < n; i++) {
       const y = yFn(vals[i]);
       if (y == null) continue;
-      points.push({ x: xS(timestamps[i]), y });
+      points.push({ x: xS(i), y });
     }
     if (points.length < 2) return "";
     const baseline = yFn(0);
@@ -581,19 +573,19 @@ function EquityCurveChart({ dates, strategy, buyHold, height = 480 }) {
 
   const dateLbls = [];
   const step = Math.max(1, Math.floor(n / 6));
-  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(timestamps[i]), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(i), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
 
   const handleMouse = (e) => {
     const r = ref.current?.getBoundingClientRect(); if (!r) return;
     const mouseX = e.clientX - r.left;
     let bestIdx = 0, bestDist = Infinity;
     for (let i = 0; i < n; i++) {
-      const dist = Math.abs(xS(timestamps[i]) - mouseX);
+      const dist = Math.abs(xS(i) - mouseX);
       if (dist < bestDist) { bestDist = dist; bestIdx = i; }
     }
     setHover(bestIdx);
   };
-  const hx = hover != null ? xS(timestamps[hover]) : null;
+  const hx = hover != null ? xS(hover) : null;
 
   const stratReturn = zStrategy.length >= 2 ? (zStrategy[zStrategy.length - 1] / zStrategy[0] - 1) * 100 : 0;
   const bhReturn = zBuyHold.length >= 2 ? (zBuyHold[zBuyHold.length - 1] / zBuyHold[0] - 1) * 100 : 0;
@@ -683,8 +675,7 @@ function SimpleChart({ dates, values, color = T.orange, label = "", yFormat = (v
 
   const pad = { l: 52, r: 8, t: 10, b: 20 };
   const plotH = height - pad.t - pad.b;
-  const timestamps = datesToTimestamps(zDates);
-  const xS = makeTimeXScale(timestamps, pad.l, pad.r, W);
+  const xS = makeIndexXScale(n, pad.l, pad.r, W);
 
   const valid = zVals.filter(v => v != null && isFinite(v));
   if (valid.length < 1) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
@@ -697,7 +688,7 @@ function SimpleChart({ dates, values, color = T.orange, label = "", yFormat = (v
   for (let i = 0; i < n; i++) {
     const y = yS(zVals[i]);
     if (y == null) continue;
-    linePath += (linePath ? "L" : "M") + `${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+    linePath += (linePath ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`;
   }
 
   let aP = "";
@@ -708,26 +699,26 @@ function SimpleChart({ dates, values, color = T.orange, label = "", yFormat = (v
       for (let i = 0; i < n; i++) {
         const y = yS(zVals[i]);
         if (y == null) continue;
-        if (!started) { aP = `M${xS(timestamps[i]).toFixed(1)},${base.toFixed(1)}`; started = true; }
-        aP += `L${xS(timestamps[i]).toFixed(1)},${y.toFixed(1)}`;
+        if (!started) { aP = `M${xS(i).toFixed(1)},${base.toFixed(1)}`; started = true; }
+        aP += `L${xS(i).toFixed(1)},${y.toFixed(1)}`;
       }
-      if (started) aP += `L${xS(timestamps[n - 1]).toFixed(1)},${base.toFixed(1)}Z`;
+      if (started) aP += `L${xS(n - 1).toFixed(1)},${base.toFixed(1)}Z`;
     }
   }
 
   const yTicks = [mn, (mn + mx) / 2, mx].map(v => ({ y: yS(v), label: yFormat(v) }));
   const dateLbls = [];
   const step = Math.max(1, Math.floor(n / 6));
-  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(timestamps[i]), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(i), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
 
   const handleMouse = (e) => {
     const r = ref.current?.getBoundingClientRect(); if (!r) return;
     const mouseX = e.clientX - r.left;
     let bi = 0, bd = Infinity;
-    for (let i = 0; i < n; i++) { const d = Math.abs(xS(timestamps[i]) - mouseX); if (d < bd) { bd = d; bi = i; } }
+    for (let i = 0; i < n; i++) { const d = Math.abs(xS(i) - mouseX); if (d < bd) { bd = d; bi = i; } }
     setHover(bi);
   };
-  const hx = hover != null ? xS(timestamps[hover]) : null;
+  const hx = hover != null ? xS(hover) : null;
 
   return (
     <div>

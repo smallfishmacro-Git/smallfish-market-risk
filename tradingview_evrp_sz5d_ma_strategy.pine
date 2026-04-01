@@ -1,0 +1,54 @@
+// This Pine Script™ source code is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+
+//@version=6
+strategy("eVRP Sizing 5D+MA30 Hedge Strategy", shorttitle="eVRP SZ5D+MA", overlay=true,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     initial_capital=100000, commission_value=0.0, slippage=0)
+
+// ─── Inputs ─────────────────────────────────────────────────────────────────
+spxSymbol    = input.symbol("SP:SPX",     "S&P 500 Symbol",  group="Data")
+vixSymbol    = input.symbol("CBOE:VIX",   "VIX Symbol",      group="Data")
+vix3mSymbol  = input.symbol("CBOE:VIX3M", "VIX3M Symbol",    group="Data")
+
+// ─── Data ───────────────────────────────────────────────────────────────────
+vixClose   = request.security(vixSymbol,   timeframe.period, close)
+vix3mClose = request.security(vix3mSymbol, timeframe.period, close)
+spxClose   = request.security(spxSymbol,   timeframe.period, close)
+
+// ─── Realized Volatility (5D) ───────────────────────────────────────────────
+spxRet      = math.log(spxClose / spxClose[1])
+realizedVol = ta.stdev(spxRet, 5) * math.sqrt(252) * 100
+
+// ─── eVRP(5D) ───────────────────────────────────────────────────────────────
+evrp = vixClose - realizedVol
+
+// ─── VIX 30D Moving Average ─────────────────────────────────────────────────
+vixMA30 = ta.sma(vixClose, 30)
+
+// ─── Signal: eVRP(5D) ≤ 0 AND VIX > VIX MA30 ──────────────────────────────
+hedgeOn = evrp <= 0 and vixClose > vixMA30
+
+// ─── One-day execution lag (signal at close → trade next bar) ───────────────
+sigLagged = hedgeOn[1]
+
+// ─── Entry / Exit ───────────────────────────────────────────────────────────
+enterSignal = sigLagged and not sigLagged[1]
+exitSignal  = not sigLagged and sigLagged[1]
+
+if enterSignal
+    strategy.entry("Hedge", strategy.long)
+
+if exitSignal
+    strategy.close("Hedge")
+
+// ─── Plot signals on chart ──────────────────────────────────────────────────
+plotshape(enterSignal, title="BUY",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), size=size.small, text="BUY")
+plotshape(exitSignal,  title="SELL", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),   size=size.small, text="SELL")
+
+// ─── Background when in hedge position ──────────────────────────────────────
+bgcolor(sigLagged ? color.new(color.orange, 90) : na, title="Hedge Active")
+
+// ─── Alert Conditions ───────────────────────────────────────────────────────
+alertcondition(enterSignal, title="Hedge BUY",  message="eVRP SZ5D+MA: BUY hedge signal")
+alertcondition(exitSignal,  title="Hedge SELL", message="eVRP SZ5D+MA: SELL hedge signal")
