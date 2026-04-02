@@ -1311,7 +1311,88 @@ function VixyModelView({ data, loading, error, onRetry }) {
 // ═══════════════════════════════════════════════════════════════
 // Volatility Signals — Part 3 Rule + ML Logistic Regression
 // ═══════════════════════════════════════════════════════════════
+// ── Shared sub-components for VolatilityView (stable references) ──
+function VolPerfBox({ label, perf: p, bhPerf: bh }) {
+  return (
+    <div style={{ display: "flex", gap: 2, margin: "6px 0" }}>
+      <StatCell label={`${label} CAGR`} value={`${p.cagr?.toFixed(1)}%`} color={p.cagr >= 0 ? T.green : T.red} />
+      <StatCell label="SHARPE" value={p.sharpe?.toFixed(2)} color={p.sharpe >= 0.5 ? T.green : T.text} />
+      <StatCell label="MAX DD" value={`${p.max_drawdown?.toFixed(1)}%`} color={T.red} />
+      <StatCell label="B&H CAGR" value={`${bh.cagr?.toFixed(1)}%`} color={bh.cagr >= 0 ? T.green : T.red} />
+    </div>
+  );
+}
+
+function VolTxnTable({ rows }) {
+  if (!rows || rows.length === 0) return <div style={{ color: T.dim, fontSize: 9, padding: 8 }}>No transactions</div>;
+  return (
+    <div style={{ maxHeight: 220, overflow: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+            {["DATE", "ACTION", "SPX"].map(h => (
+              <th key={h} style={{ padding: "5px 4px", textAlign: h === "SPX" ? "right" : "left",
+                color: T.dim, fontWeight: 600, letterSpacing: 0.5,
+                position: "sticky", top: 0, background: T.bg, zIndex: 1 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {[...rows].reverse().map((t, i) => (
+            <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+              <td style={{ padding: "4px 4px", color: T.text }}>{t.date}</td>
+              <td style={{ padding: "4px 4px", color: t.action === "ENTER" ? T.green : T.red, fontWeight: 600 }}>{t.action}</td>
+              <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.spx?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function dv(arr) { return arr ? { dates: arr.map(p => p.d), vals: arr.map(p => p.v) } : null; }
+
+function alignTwo(base, other) {
+  if (!base || !other) return null;
+  const map = {};
+  for (let i = 0; i < other.dates.length; i++) map[other.dates[i]] = other.vals[i];
+  const d = [], a = [], b = [];
+  for (let i = 0; i < base.dates.length; i++) {
+    if (map[base.dates[i]] !== undefined) { d.push(base.dates[i]); a.push(base.vals[i]); b.push(map[base.dates[i]]); }
+  }
+  return { dates: d, strategy: a, buyHold: b };
+}
+
+function normTo100(arr) { const b = arr[0] || 1; return arr.map(v => v / b * 100); }
+
+const volSignalColor = (sig) => sig === "RISK-ON" ? T.green : T.red;
+
 function VolatilityView({ data, loading, error, onRetry }) {
+  // Memoize all derived data so it only recomputes when `data` changes
+  const derived = useMemo(() => {
+    if (!data) return null;
+    const cs = data.current_signals || {};
+    const perf = data.performance || {};
+    const ec = data.equity_curves || {};
+    const sc = data.signal_charts || {};
+    const txns = data.transactions || {};
+
+    const ecSpx = dv(ec.spx);
+    return {
+      p3: cs.part3_rule || {},
+      ml: cs.ml_logreg || {},
+      p3Perf: perf.part3_rule || {},
+      mlPerf: perf.ml_logreg || {},
+      bhPerf: perf.buy_hold || {},
+      p3Aligned: alignTwo(dv(ec.part3_rule), ecSpx),
+      mlAligned: alignTwo(dv(ec.ml_logreg), ecSpx),
+      scP3: dv(sc.part3_rule),
+      scMl: dv(sc.ml_probability),
+      txns,
+    };
+  }, [data]);
+
   if (loading) return (
     <div style={{ textAlign: "center", paddingTop: 100 }}>
       <div style={{ fontSize: 12, color: T.orange, letterSpacing: 2, marginBottom: 6 }}>LOADING</div>
@@ -1325,92 +1406,15 @@ function VolatilityView({ data, loading, error, onRetry }) {
         border: `1px solid ${T.border}`, background: "transparent", color: T.dim, cursor: "pointer" }}>RETRY</button>
     </div>
   );
-  if (!data) return null;
+  if (!derived) return null;
 
-  const cs = data.current_signals || {};
-  const perf = data.performance || {};
-  const ec = data.equity_curves || {};
-  const sc = data.signal_charts || {};
-  const txns = data.transactions || {};
-
-  // ── helpers ──
-  const dv = (arr) => arr ? { dates: arr.map(p => p.d), vals: arr.map(p => p.v) } : null;
-
-  const ecSpx = dv(ec.spx);
-  const ecP3 = dv(ec.part3_rule);
-  const ecMl = dv(ec.ml_logreg);
-  const scP3 = dv(sc.part3_rule);
-  const scMl = dv(sc.ml_probability);
-
-  // Align equity curves to common date axis (inner join)
-  const alignTwo = (base, other) => {
-    if (!base || !other) return null;
-    const map = {};
-    for (let i = 0; i < other.dates.length; i++) map[other.dates[i]] = other.vals[i];
-    const d = [], a = [], b = [];
-    for (let i = 0; i < base.dates.length; i++) {
-      if (map[base.dates[i]] !== undefined) { d.push(base.dates[i]); a.push(base.vals[i]); b.push(map[base.dates[i]]); }
-    }
-    return { dates: d, strategy: a, buyHold: b };
-  };
-
-  // Normalize to start at 100
-  const norm = (arr) => { const b = arr[0] || 1; return arr.map(v => v / b * 100); };
-
-  const p3Aligned = alignTwo(ecP3, ecSpx);
-  const mlAligned = alignTwo(ecMl, ecSpx);
-
-  // ── Part 3 Rule section data ──
-  const p3 = cs.part3_rule || {};
-  const p3Perf = perf.part3_rule || {};
-  const bhPerf = perf.buy_hold || {};
+  const { p3, ml, p3Perf, mlPerf, bhPerf, p3Aligned, mlAligned, scP3, scMl, txns } = derived;
   const p3Signals = p3.individual_signals || {};
   const p3Features = p3.feature_values || {};
 
-  // ── ML section data ──
-  const ml = cs.ml_logreg || {};
-  const mlPerf = perf.ml_logreg || {};
-
-  const signalColor = (sig) => sig === "RISK-ON" ? T.green : T.red;
-
-  // ── Performance summary box ──
-  const PerfBox = ({ label, perf: p, bhPerf: bh }) => (
-    <div style={{ display: "flex", gap: 2, margin: "6px 0" }}>
-      <StatCell label={`${label} CAGR`} value={`${p.cagr?.toFixed(1)}%`} color={p.cagr >= 0 ? T.green : T.red} />
-      <StatCell label="SHARPE" value={p.sharpe?.toFixed(2)} color={p.sharpe >= 0.5 ? T.green : T.text} />
-      <StatCell label="MAX DD" value={`${p.max_drawdown?.toFixed(1)}%`} color={T.red} />
-      <StatCell label="B&H CAGR" value={`${bh.cagr?.toFixed(1)}%`} color={bh.cagr >= 0 ? T.green : T.red} />
-    </div>
-  );
-
-  // ── Transaction table ──
-  const TxnTable = ({ rows }) => {
-    if (!rows || rows.length === 0) return <div style={{ color: T.dim, fontSize: 9, padding: 8 }}>No transactions</div>;
-    return (
-      <div style={{ maxHeight: 220, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-              {["DATE", "ACTION", "SPX"].map(h => (
-                <th key={h} style={{ padding: "5px 4px", textAlign: h === "SPX" ? "right" : "left",
-                  color: T.dim, fontWeight: 600, letterSpacing: 0.5,
-                  position: "sticky", top: 0, background: T.bg, zIndex: 1 }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {[...rows].reverse().map((t, i) => (
-              <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                <td style={{ padding: "4px 4px", color: T.text }}>{t.date}</td>
-                <td style={{ padding: "4px 4px", color: t.action === "ENTER" ? T.green : T.red, fontWeight: 600 }}>{t.action}</td>
-                <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.spx?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
+  const sectionRow = { display: "flex", gap: 0, flexWrap: "wrap" };
+  const colLeft = { flex: "1 1 55%", minWidth: 340, borderRight: `1px solid ${T.border}` };
+  const colRight = { flex: "1 1 45%", minWidth: 300, overflow: "auto" };
 
   return (
     <div style={{ overflow: "auto", flex: 1 }}>
@@ -1419,69 +1423,75 @@ function VolatilityView({ data, loading, error, onRetry }) {
         <div style={{ fontSize: 13, fontWeight: 700, color: T.orange, letterSpacing: 1.2, padding: "0 8px 6px",
           borderBottom: `1px solid ${T.border}` }}>PART 3 COMBINED RULE</div>
 
-        {/* Current signal card */}
-        <div style={{ padding: "8px 8px 4px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-            <div style={{ padding: "6px 16px", fontSize: 14, fontWeight: 700, fontFamily: T.font,
-              background: `${signalColor(p3.signal)}18`, border: `1px solid ${signalColor(p3.signal)}55`,
-              color: signalColor(p3.signal), letterSpacing: 1 }}>{p3.signal || "—"}</div>
-            <span style={{ fontSize: 11, color: T.text }}>{p3.signals_on ?? "?"} / {Object.keys(p3Signals).length || 8} signals on
-              <span style={{ color: T.dim, marginLeft: 6 }}>(required: {p3.signals_required ?? 4})</span></span>
-          </div>
-
-          {/* Individual signals grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 2 }}>
-            {Object.entries(p3Signals).map(([name, on]) => (
-              <div key={name} style={{ display: "flex", alignItems: "center", gap: 6,
-                padding: "4px 6px", background: T.bgPanel, border: `1px solid ${T.border}`, fontSize: 9 }}>
-                <span style={{ fontSize: 11, color: on ? T.green : T.red }}>{on ? "✓" : "✗"}</span>
-                <span style={{ color: T.text, flex: 1 }}>{name}</span>
-                {p3Features && (() => {
-                  const fKey = name.split("(")[0].trim().replace(/ /g, "");
-                  const match = Object.entries(p3Features).find(([k]) => name.toLowerCase().includes(k.toLowerCase()));
-                  return match ? <span style={{ color: T.bright, fontWeight: 600 }}>{typeof match[1] === "number" ? match[1].toFixed(2) : match[1]}</span> : null;
-                })()}
+        <div style={sectionRow}>
+          {/* LEFT — equity curve + performance */}
+          <div style={colLeft}>
+            {p3Aligned && (
+              <div style={{ padding: "8px 8px 0" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
+                <InfoBox>
+                  <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+                  <span style={{ color: T.orange }}>Orange</span> = Part 3 Rule strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
+                </InfoBox>
+                <div style={{ background: T.bgPanel }}>
+                  <EquityCurveChart dates={p3Aligned.dates} strategy={normTo100(p3Aligned.strategy)} buyHold={normTo100(p3Aligned.buyHold)} height={380} />
+                </div>
+                <VolPerfBox label="PART3" perf={p3Perf} bhPerf={bhPerf} />
               </div>
-            ))}
+            )}
           </div>
-        </div>
 
-        {/* Equity curve */}
-        {p3Aligned && (
-          <div style={{ padding: "8px 8px 0" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
-            <InfoBox>
-              <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
-              <span style={{ color: T.orange }}>Orange</span> = Part 3 Rule strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
-            </InfoBox>
-            <PerfBox label="PART3" perf={p3Perf} bhPerf={bhPerf} />
-            <div style={{ background: T.bgPanel }}>
-              <EquityCurveChart dates={p3Aligned.dates} strategy={norm(p3Aligned.strategy)} buyHold={norm(p3Aligned.buyHold)} height={380} />
+          {/* RIGHT — signal card + signal chart + transactions */}
+          <div style={colRight}>
+            {/* Current signal card */}
+            <div style={{ padding: "8px 8px 4px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+                <div style={{ padding: "6px 16px", fontSize: 14, fontWeight: 700, fontFamily: T.font,
+                  background: `${volSignalColor(p3.signal)}18`, border: `1px solid ${volSignalColor(p3.signal)}55`,
+                  color: volSignalColor(p3.signal), letterSpacing: 1 }}>{p3.signal || "—"}</div>
+                <span style={{ fontSize: 11, color: T.text }}>{p3.signals_on ?? "?"} / {Object.keys(p3Signals).length || 8} signals on
+                  <span style={{ color: T.dim, marginLeft: 6 }}>(required: {p3.signals_required ?? 4})</span></span>
+              </div>
+
+              {/* Individual signals grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 2 }}>
+                {Object.entries(p3Signals).map(([name, on]) => (
+                  <div key={name} style={{ display: "flex", alignItems: "center", gap: 6,
+                    padding: "4px 6px", background: T.bgPanel, border: `1px solid ${T.border}`, fontSize: 9 }}>
+                    <span style={{ fontSize: 11, color: on ? T.green : T.red }}>{on ? "✓" : "✗"}</span>
+                    <span style={{ color: T.text, flex: 1 }}>{name}</span>
+                    {(() => {
+                      const match = Object.entries(p3Features).find(([k]) => name.toLowerCase().includes(k.toLowerCase()));
+                      return match ? <span style={{ color: T.bright, fontWeight: 600 }}>{typeof match[1] === "number" ? match[1].toFixed(2) : match[1]}</span> : null;
+                    })()}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Signal chart — binary bars */}
+            {scP3 && (
+              <div style={{ padding: "8px 8px 0" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>SIGNAL HISTORY (LAST 2 YEARS)</div>
+                <InfoBox>
+                  <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+                  1 = RISK-ON (in market). 0 = RISK-OFF (out of market).
+                </InfoBox>
+                <div style={{ background: T.bgPanel }}>
+                  <SimpleChart dates={scP3.dates} values={scP3.vals} color={T.green} label="Signal"
+                    yFormat={v => v >= 0.5 ? "RISK-ON" : "RISK-OFF"} height={180} areaFill areaBase={0} />
+                </div>
+              </div>
+            )}
+
+            {/* Transaction table */}
+            <div style={{ padding: "8px 8px 0" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>
+                TRANSACTION HISTORY <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>last 2 years</span>
+              </div>
+              <VolTxnTable rows={txns.part3_rule} />
             </div>
           </div>
-        )}
-
-        {/* Signal chart — binary bars */}
-        {scP3 && (
-          <div style={{ padding: "8px 8px 0" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>SIGNAL HISTORY (LAST 2 YEARS)</div>
-            <InfoBox>
-              <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
-              1 = RISK-ON (in market). 0 = RISK-OFF (out of market).
-            </InfoBox>
-            <div style={{ background: T.bgPanel }}>
-              <SimpleChart dates={scP3.dates} values={scP3.vals} color={T.green} label="Signal"
-                yFormat={v => v >= 0.5 ? "RISK-ON" : "RISK-OFF"} height={180} areaFill areaBase={0} />
-            </div>
-          </div>
-        )}
-
-        {/* Transaction table */}
-        <div style={{ padding: "8px 8px 0" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>
-            TRANSACTION HISTORY <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>last 2 years</span>
-          </div>
-          <TxnTable rows={txns.part3_rule} />
         </div>
       </div>
 
@@ -1490,79 +1500,86 @@ function VolatilityView({ data, loading, error, onRetry }) {
         <div style={{ fontSize: 13, fontWeight: 700, color: T.purple, letterSpacing: 1.2, padding: "0 8px 6px",
           borderBottom: `1px solid ${T.border}` }}>ML LOGISTIC REGRESSION</div>
 
-        {/* Current signal card */}
-        <div style={{ padding: "8px 8px 4px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
-            <div style={{ padding: "6px 16px", fontSize: 14, fontWeight: 700, fontFamily: T.font,
-              background: `${signalColor(ml.signal)}18`, border: `1px solid ${signalColor(ml.signal)}55`,
-              color: signalColor(ml.signal), letterSpacing: 1 }}>{ml.signal || "—"}</div>
-            <span style={{ fontSize: 11, color: T.bright }}>P(drawdown) = {ml.probability != null ? ml.probability.toFixed(2) : "—"}</span>
-            <span style={{ fontSize: 9, color: T.dim }}>threshold: {ml.threshold ?? 0.40}</span>
+        <div style={sectionRow}>
+          {/* LEFT — equity curve + performance */}
+          <div style={colLeft}>
+            {mlAligned && (
+              <div style={{ padding: "8px 8px 0" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
+                <InfoBox>
+                  <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
+                  <span style={{ color: T.purple }}>Purple</span> = ML Logistic Regression strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
+                </InfoBox>
+                <div style={{ background: T.bgPanel }}>
+                  <EquityCurveChart dates={mlAligned.dates} strategy={normTo100(mlAligned.strategy)} buyHold={normTo100(mlAligned.buyHold)} height={380} />
+                </div>
+                <VolPerfBox label="ML" perf={mlPerf} bhPerf={bhPerf} />
+              </div>
+            )}
           </div>
 
-          {/* Probability gauge bar */}
-          {ml.probability != null && (
-            <div style={{ padding: "0 0 6px" }}>
-              <div style={{ position: "relative", height: 18, background: T.bgPanel, border: `1px solid ${T.border}`,
-                borderRadius: 2, overflow: "hidden" }}>
-                <div style={{ position: "absolute", left: 0, top: 0, height: "100%",
-                  width: `${(ml.probability * 100).toFixed(1)}%`,
-                  background: ml.probability >= (ml.threshold ?? 0.4) ? `${T.red}55` : `${T.green}55`,
-                  transition: "width 0.3s" }} />
-                {/* Threshold marker */}
-                <div style={{ position: "absolute", left: `${((ml.threshold ?? 0.4) * 100).toFixed(1)}%`, top: 0,
-                  width: 2, height: "100%", background: T.amber }} />
-                <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center",
-                  justifyContent: "center", height: "100%", fontSize: 9, fontFamily: T.font, color: T.bright }}>
-                  {(ml.probability * 100).toFixed(0)}%
+          {/* RIGHT — signal card + probability chart + transactions */}
+          <div style={colRight}>
+            {/* Current signal card */}
+            <div style={{ padding: "8px 8px 4px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
+                <div style={{ padding: "6px 16px", fontSize: 14, fontWeight: 700, fontFamily: T.font,
+                  background: `${volSignalColor(ml.signal)}18`, border: `1px solid ${volSignalColor(ml.signal)}55`,
+                  color: volSignalColor(ml.signal), letterSpacing: 1 }}>{ml.signal || "—"}</div>
+                <span style={{ fontSize: 11, color: T.bright }}>P(drawdown) = {ml.probability != null ? ml.probability.toFixed(2) : "—"}</span>
+                <span style={{ fontSize: 9, color: T.dim }}>threshold: {ml.threshold ?? 0.40}</span>
+              </div>
+
+              {/* Probability gauge bar */}
+              {ml.probability != null && (
+                <div style={{ padding: "0 0 6px" }}>
+                  <div style={{ position: "relative", height: 18, background: T.bgPanel, border: `1px solid ${T.border}`,
+                    borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ position: "absolute", left: 0, top: 0, height: "100%",
+                      width: `${(ml.probability * 100).toFixed(1)}%`,
+                      background: ml.probability >= (ml.threshold ?? 0.4) ? `${T.red}55` : `${T.green}55`,
+                      transition: "width 0.3s" }} />
+                    {/* Threshold marker */}
+                    <div style={{ position: "absolute", left: `${((ml.threshold ?? 0.4) * 100).toFixed(1)}%`, top: 0,
+                      width: 2, height: "100%", background: T.amber }} />
+                    <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center",
+                      justifyContent: "center", height: "100%", fontSize: 9, fontFamily: T.font, color: T.bright }}>
+                      {(ml.probability * 100).toFixed(0)}%
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: T.dim, marginTop: 2 }}>
+                    <span>0%</span>
+                    <span style={{ color: T.amber }}>▲ threshold {((ml.threshold ?? 0.4) * 100).toFixed(0)}%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+              )}
+
+              {ml.target && <div style={{ fontSize: 9, color: T.dim, marginTop: 2 }}>Target: {ml.target}</div>}
+            </div>
+
+            {/* Probability chart with threshold line */}
+            {scMl && (
+              <div style={{ padding: "8px 8px 0" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>ML PROBABILITY (LAST 2 YEARS)</div>
+                <InfoBox>
+                  <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
+                  Probability of ≥5% drawdown in 20 trading days. Dashed line = {((ml.threshold ?? 0.4) * 100).toFixed(0)}% threshold.
+                </InfoBox>
+                <div style={{ background: T.bgPanel }}>
+                  <MlProbabilityChart dates={scMl.dates} values={scMl.vals} threshold={ml.threshold ?? 0.40} height={220} />
                 </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: T.dim, marginTop: 2 }}>
-                <span>0%</span>
-                <span style={{ color: T.amber }}>▲ threshold {((ml.threshold ?? 0.4) * 100).toFixed(0)}%</span>
-                <span>100%</span>
+            )}
+
+            {/* Transaction table */}
+            <div style={{ padding: "8px 8px 12px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>
+                TRANSACTION HISTORY <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>last 2 years</span>
               </div>
-            </div>
-          )}
-
-          {ml.target && <div style={{ fontSize: 9, color: T.dim, marginTop: 2 }}>Target: {ml.target}</div>}
-        </div>
-
-        {/* Equity curve */}
-        {mlAligned && (
-          <div style={{ padding: "8px 8px 0" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
-            <InfoBox>
-              <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
-              <span style={{ color: T.purple }}>Purple</span> = ML Logistic Regression strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
-            </InfoBox>
-            <PerfBox label="ML" perf={mlPerf} bhPerf={bhPerf} />
-            <div style={{ background: T.bgPanel }}>
-              <EquityCurveChart dates={mlAligned.dates} strategy={norm(mlAligned.strategy)} buyHold={norm(mlAligned.buyHold)} height={380} />
+              <VolTxnTable rows={txns.ml_logreg} />
             </div>
           </div>
-        )}
-
-        {/* Probability chart with threshold line */}
-        {scMl && (
-          <div style={{ padding: "8px 8px 0" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>ML PROBABILITY (LAST 2 YEARS)</div>
-            <InfoBox>
-              <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
-              Probability of ≥5% drawdown in 20 trading days. Dashed line = {((ml.threshold ?? 0.4) * 100).toFixed(0)}% threshold.
-            </InfoBox>
-            <div style={{ background: T.bgPanel }}>
-              <MlProbabilityChart dates={scMl.dates} values={scMl.vals} threshold={ml.threshold ?? 0.40} height={220} />
-            </div>
-          </div>
-        )}
-
-        {/* Transaction table */}
-        <div style={{ padding: "8px 8px 12px" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>
-            TRANSACTION HISTORY <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>last 2 years</span>
-          </div>
-          <TxnTable rows={txns.ml_logreg} />
         </div>
       </div>
     </div>
@@ -1722,7 +1739,7 @@ export default function App() {
       const res = await fetch("https://raw.githubusercontent.com/smallfishmacro-Git/market-dashboard/main/data/datasets/volatility_signals.json");
       if (!res.ok) throw new Error(`API ${res.status}`);
       setVolData(await res.json());
-    } catch (e) { setVolError(e.message); volFetched.current = false; }
+    } catch (e) { setVolError(e.message); }
     finally { setVolLoading(false); }
   }, []);
 
