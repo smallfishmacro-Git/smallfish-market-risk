@@ -1369,6 +1369,11 @@ function normTo100(arr) { const b = arr[0] || 1; return arr.map(v => v / b * 100
 const volSignalColor = (sig) => sig === "RISK-ON" ? T.green : T.red;
 
 function VolatilityView({ data, loading, error, onRetry }) {
+  const [p3EqTf, setP3EqTf] = useState("ALL");
+  const [p3SigTf, setP3SigTf] = useState("ALL");
+  const [mlEqTf, setMlEqTf] = useState("ALL");
+  const [mlSigTf, setMlSigTf] = useState("ALL");
+
   // Memoize all derived data so it only recomputes when `data` changes
   const derived = useMemo(() => {
     if (!data) return null;
@@ -1412,6 +1417,31 @@ function VolatilityView({ data, loading, error, onRetry }) {
   const p3Signals = p3.individual_signals || {};
   const p3Features = p3.feature_values || {};
 
+  // Apply timeframe filtering
+  const p3EqSliced = useMemo(() => {
+    if (!p3Aligned) return null;
+    const { dates, arrays } = sliceByTf(p3Aligned.dates, [p3Aligned.strategy, p3Aligned.buyHold], p3EqTf);
+    return { dates, strategy: arrays[0], buyHold: arrays[1] };
+  }, [p3Aligned, p3EqTf]);
+
+  const mlEqSliced = useMemo(() => {
+    if (!mlAligned) return null;
+    const { dates, arrays } = sliceByTf(mlAligned.dates, [mlAligned.strategy, mlAligned.buyHold], mlEqTf);
+    return { dates, strategy: arrays[0], buyHold: arrays[1] };
+  }, [mlAligned, mlEqTf]);
+
+  const scP3Sliced = useMemo(() => {
+    if (!scP3) return null;
+    const { dates, arrays } = sliceByTf(scP3.dates, [scP3.vals], p3SigTf);
+    return { dates, vals: arrays[0] };
+  }, [scP3, p3SigTf]);
+
+  const scMlSliced = useMemo(() => {
+    if (!scMl) return null;
+    const { dates, arrays } = sliceByTf(scMl.dates, [scMl.vals], mlSigTf);
+    return { dates, vals: arrays[0] };
+  }, [scMl, mlSigTf]);
+
   const sectionRow = { display: "flex", gap: 0, flexWrap: "wrap" };
   const colLeft = { flex: "1 1 55%", minWidth: 340, borderRight: `1px solid ${T.border}` };
   const colRight = { flex: "1 1 45%", minWidth: 300, overflow: "auto" };
@@ -1426,15 +1456,18 @@ function VolatilityView({ data, loading, error, onRetry }) {
         <div style={sectionRow}>
           {/* LEFT — equity curve + performance */}
           <div style={colLeft}>
-            {p3Aligned && (
+            {p3EqSliced && (
               <div style={{ padding: "8px 8px 0" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>EQUITY CURVE</div>
+                  <TimeframeBar value={p3EqTf} onChange={setP3EqTf} />
+                </div>
                 <InfoBox>
                   <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
                   <span style={{ color: T.orange }}>Orange</span> = Part 3 Rule strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
                 </InfoBox>
                 <div style={{ background: T.bgPanel }}>
-                  <EquityCurveChart dates={p3Aligned.dates} strategy={normTo100(p3Aligned.strategy)} buyHold={normTo100(p3Aligned.buyHold)} height={380} />
+                  <EquityCurveChart dates={p3EqSliced.dates} strategy={normTo100(p3EqSliced.strategy)} buyHold={normTo100(p3EqSliced.buyHold)} height={380} />
                 </div>
                 <VolPerfBox label="PART3" perf={p3Perf} bhPerf={bhPerf} />
               </div>
@@ -1470,15 +1503,18 @@ function VolatilityView({ data, loading, error, onRetry }) {
             </div>
 
             {/* Signal chart — binary bars */}
-            {scP3 && (
+            {scP3Sliced && (
               <div style={{ padding: "8px 8px 0" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>SIGNAL HISTORY (LAST 2 YEARS)</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>SIGNAL HISTORY</div>
+                  <TimeframeBar value={p3SigTf} onChange={setP3SigTf} />
+                </div>
                 <InfoBox>
                   <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
                   1 = RISK-ON (in market). 0 = RISK-OFF (out of market).
                 </InfoBox>
                 <div style={{ background: T.bgPanel }}>
-                  <SimpleChart dates={scP3.dates} values={scP3.vals} color={T.green} label="Signal"
+                  <SimpleChart dates={scP3Sliced.dates} values={scP3Sliced.vals} color={T.green} label="Signal"
                     yFormat={v => v >= 0.5 ? "RISK-ON" : "RISK-OFF"} height={180} areaFill areaBase={0} />
                 </div>
               </div>
@@ -1503,15 +1539,18 @@ function VolatilityView({ data, loading, error, onRetry }) {
         <div style={sectionRow}>
           {/* LEFT — equity curve + performance */}
           <div style={colLeft}>
-            {mlAligned && (
+            {mlEqSliced && (
               <div style={{ padding: "8px 8px 0" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>EQUITY CURVE</div>
+                  <TimeframeBar value={mlEqTf} onChange={setMlEqTf} />
+                </div>
                 <InfoBox>
                   <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
                   <span style={{ color: T.purple }}>Purple</span> = ML Logistic Regression strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
                 </InfoBox>
                 <div style={{ background: T.bgPanel }}>
-                  <EquityCurveChart dates={mlAligned.dates} strategy={normTo100(mlAligned.strategy)} buyHold={normTo100(mlAligned.buyHold)} height={380} />
+                  <EquityCurveChart dates={mlEqSliced.dates} strategy={normTo100(mlEqSliced.strategy)} buyHold={normTo100(mlEqSliced.buyHold)} height={380} />
                 </div>
                 <VolPerfBox label="ML" perf={mlPerf} bhPerf={bhPerf} />
               </div>
@@ -1559,15 +1598,18 @@ function VolatilityView({ data, loading, error, onRetry }) {
             </div>
 
             {/* Probability chart with threshold line */}
-            {scMl && (
+            {scMlSliced && (
               <div style={{ padding: "8px 8px 0" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>ML PROBABILITY (LAST 2 YEARS)</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>ML PROBABILITY</div>
+                  <TimeframeBar value={mlSigTf} onChange={setMlSigTf} />
+                </div>
                 <InfoBox>
                   <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
                   Probability of ≥5% drawdown in 20 trading days. Dashed line = {((ml.threshold ?? 0.4) * 100).toFixed(0)}% threshold.
                 </InfoBox>
                 <div style={{ background: T.bgPanel }}>
-                  <MlProbabilityChart dates={scMl.dates} values={scMl.vals} threshold={ml.threshold ?? 0.40} height={220} />
+                  <MlProbabilityChart dates={scMlSliced.dates} values={scMlSliced.vals} threshold={ml.threshold ?? 0.40} height={220} />
                 </div>
               </div>
             )}
