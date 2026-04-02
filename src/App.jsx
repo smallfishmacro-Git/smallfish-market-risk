@@ -1309,6 +1309,372 @@ function VixyModelView({ data, loading, error, onRetry }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Volatility Signals — Part 3 Rule + ML Logistic Regression
+// ═══════════════════════════════════════════════════════════════
+function VolatilityView({ data, loading, error, onRetry }) {
+  if (loading) return (
+    <div style={{ textAlign: "center", paddingTop: 100 }}>
+      <div style={{ fontSize: 12, color: T.orange, letterSpacing: 2, marginBottom: 6 }}>LOADING</div>
+      <div style={{ fontSize: 10, color: T.dim }}>Fetching volatility signals…</div>
+    </div>
+  );
+  if (error) return (
+    <div style={{ textAlign: "center", paddingTop: 100 }}>
+      <div style={{ fontSize: 12, color: T.red, marginBottom: 8 }}>ERROR: {error}</div>
+      <button onClick={onRetry} style={{ padding: "4px 14px", fontSize: 10, fontFamily: T.font,
+        border: `1px solid ${T.border}`, background: "transparent", color: T.dim, cursor: "pointer" }}>RETRY</button>
+    </div>
+  );
+  if (!data) return null;
+
+  const cs = data.current_signals || {};
+  const perf = data.performance || {};
+  const ec = data.equity_curves || {};
+  const sc = data.signal_charts || {};
+  const txns = data.transactions || {};
+
+  // ── helpers ──
+  const dv = (arr) => arr ? { dates: arr.map(p => p.d), vals: arr.map(p => p.v) } : null;
+
+  const ecSpx = dv(ec.spx);
+  const ecP3 = dv(ec.part3_rule);
+  const ecMl = dv(ec.ml_logreg);
+  const scP3 = dv(sc.part3_rule);
+  const scMl = dv(sc.ml_probability);
+
+  // Align equity curves to common date axis (inner join)
+  const alignTwo = (base, other) => {
+    if (!base || !other) return null;
+    const map = {};
+    for (let i = 0; i < other.dates.length; i++) map[other.dates[i]] = other.vals[i];
+    const d = [], a = [], b = [];
+    for (let i = 0; i < base.dates.length; i++) {
+      if (map[base.dates[i]] !== undefined) { d.push(base.dates[i]); a.push(base.vals[i]); b.push(map[base.dates[i]]); }
+    }
+    return { dates: d, strategy: a, buyHold: b };
+  };
+
+  // Normalize to start at 100
+  const norm = (arr) => { const b = arr[0] || 1; return arr.map(v => v / b * 100); };
+
+  const p3Aligned = alignTwo(ecP3, ecSpx);
+  const mlAligned = alignTwo(ecMl, ecSpx);
+
+  // ── Part 3 Rule section data ──
+  const p3 = cs.part3_rule || {};
+  const p3Perf = perf.part3_rule || {};
+  const bhPerf = perf.buy_hold || {};
+  const p3Signals = p3.individual_signals || {};
+  const p3Features = p3.feature_values || {};
+
+  // ── ML section data ──
+  const ml = cs.ml_logreg || {};
+  const mlPerf = perf.ml_logreg || {};
+
+  const signalColor = (sig) => sig === "RISK-ON" ? T.green : T.red;
+
+  // ── Performance summary box ──
+  const PerfBox = ({ label, perf: p, bhPerf: bh }) => (
+    <div style={{ display: "flex", gap: 2, margin: "6px 0" }}>
+      <StatCell label={`${label} CAGR`} value={`${p.cagr?.toFixed(1)}%`} color={p.cagr >= 0 ? T.green : T.red} />
+      <StatCell label="SHARPE" value={p.sharpe?.toFixed(2)} color={p.sharpe >= 0.5 ? T.green : T.text} />
+      <StatCell label="MAX DD" value={`${p.max_drawdown?.toFixed(1)}%`} color={T.red} />
+      <StatCell label="B&H CAGR" value={`${bh.cagr?.toFixed(1)}%`} color={bh.cagr >= 0 ? T.green : T.red} />
+    </div>
+  );
+
+  // ── Transaction table ──
+  const TxnTable = ({ rows }) => {
+    if (!rows || rows.length === 0) return <div style={{ color: T.dim, fontSize: 9, padding: 8 }}>No transactions</div>;
+    return (
+      <div style={{ maxHeight: 220, overflow: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9, fontFamily: T.font }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+              {["DATE", "ACTION", "SPX"].map(h => (
+                <th key={h} style={{ padding: "5px 4px", textAlign: h === "SPX" ? "right" : "left",
+                  color: T.dim, fontWeight: 600, letterSpacing: 0.5,
+                  position: "sticky", top: 0, background: T.bg, zIndex: 1 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[...rows].reverse().map((t, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                <td style={{ padding: "4px 4px", color: T.text }}>{t.date}</td>
+                <td style={{ padding: "4px 4px", color: t.action === "ENTER" ? T.green : T.red, fontWeight: 600 }}>{t.action}</td>
+                <td style={{ padding: "4px 4px", textAlign: "right", color: T.bright }}>{t.spx?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ overflow: "auto", flex: 1 }}>
+      {/* ═══ SECTION 1 — PART 3 COMBINED RULE ═══ */}
+      <div style={{ padding: "12px 0 0" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.orange, letterSpacing: 1.2, padding: "0 8px 6px",
+          borderBottom: `1px solid ${T.border}` }}>PART 3 COMBINED RULE</div>
+
+        {/* Current signal card */}
+        <div style={{ padding: "8px 8px 4px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+            <div style={{ padding: "6px 16px", fontSize: 14, fontWeight: 700, fontFamily: T.font,
+              background: `${signalColor(p3.signal)}18`, border: `1px solid ${signalColor(p3.signal)}55`,
+              color: signalColor(p3.signal), letterSpacing: 1 }}>{p3.signal || "—"}</div>
+            <span style={{ fontSize: 11, color: T.text }}>{p3.signals_on ?? "?"} / {Object.keys(p3Signals).length || 8} signals on
+              <span style={{ color: T.dim, marginLeft: 6 }}>(required: {p3.signals_required ?? 4})</span></span>
+          </div>
+
+          {/* Individual signals grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 2 }}>
+            {Object.entries(p3Signals).map(([name, on]) => (
+              <div key={name} style={{ display: "flex", alignItems: "center", gap: 6,
+                padding: "4px 6px", background: T.bgPanel, border: `1px solid ${T.border}`, fontSize: 9 }}>
+                <span style={{ fontSize: 11, color: on ? T.green : T.red }}>{on ? "✓" : "✗"}</span>
+                <span style={{ color: T.text, flex: 1 }}>{name}</span>
+                {p3Features && (() => {
+                  const fKey = name.split("(")[0].trim().replace(/ /g, "");
+                  const match = Object.entries(p3Features).find(([k]) => name.toLowerCase().includes(k.toLowerCase()));
+                  return match ? <span style={{ color: T.bright, fontWeight: 600 }}>{typeof match[1] === "number" ? match[1].toFixed(2) : match[1]}</span> : null;
+                })()}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Equity curve */}
+        {p3Aligned && (
+          <div style={{ padding: "8px 8px 0" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
+            <InfoBox>
+              <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+              <span style={{ color: T.orange }}>Orange</span> = Part 3 Rule strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
+            </InfoBox>
+            <PerfBox label="PART3" perf={p3Perf} bhPerf={bhPerf} />
+            <div style={{ background: T.bgPanel }}>
+              <EquityCurveChart dates={p3Aligned.dates} strategy={norm(p3Aligned.strategy)} buyHold={norm(p3Aligned.buyHold)} height={380} />
+            </div>
+          </div>
+        )}
+
+        {/* Signal chart — binary bars */}
+        {scP3 && (
+          <div style={{ padding: "8px 8px 0" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>SIGNAL HISTORY (LAST 2 YEARS)</div>
+            <InfoBox>
+              <span style={{ color: T.orange, fontWeight: 600 }}>How to read: </span>
+              1 = RISK-ON (in market). 0 = RISK-OFF (out of market).
+            </InfoBox>
+            <div style={{ background: T.bgPanel }}>
+              <SimpleChart dates={scP3.dates} values={scP3.vals} color={T.green} label="Signal"
+                yFormat={v => v >= 0.5 ? "RISK-ON" : "RISK-OFF"} height={180} areaFill areaBase={0} />
+            </div>
+          </div>
+        )}
+
+        {/* Transaction table */}
+        <div style={{ padding: "8px 8px 0" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>
+            TRANSACTION HISTORY <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>last 2 years</span>
+          </div>
+          <TxnTable rows={txns.part3_rule} />
+        </div>
+      </div>
+
+      {/* ═══ SECTION 2 — ML LOGISTIC REGRESSION ═══ */}
+      <div style={{ padding: "20px 0 0" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.purple, letterSpacing: 1.2, padding: "0 8px 6px",
+          borderBottom: `1px solid ${T.border}` }}>ML LOGISTIC REGRESSION</div>
+
+        {/* Current signal card */}
+        <div style={{ padding: "8px 8px 4px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
+            <div style={{ padding: "6px 16px", fontSize: 14, fontWeight: 700, fontFamily: T.font,
+              background: `${signalColor(ml.signal)}18`, border: `1px solid ${signalColor(ml.signal)}55`,
+              color: signalColor(ml.signal), letterSpacing: 1 }}>{ml.signal || "—"}</div>
+            <span style={{ fontSize: 11, color: T.bright }}>P(drawdown) = {ml.probability != null ? ml.probability.toFixed(2) : "—"}</span>
+            <span style={{ fontSize: 9, color: T.dim }}>threshold: {ml.threshold ?? 0.40}</span>
+          </div>
+
+          {/* Probability gauge bar */}
+          {ml.probability != null && (
+            <div style={{ padding: "0 0 6px" }}>
+              <div style={{ position: "relative", height: 18, background: T.bgPanel, border: `1px solid ${T.border}`,
+                borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ position: "absolute", left: 0, top: 0, height: "100%",
+                  width: `${(ml.probability * 100).toFixed(1)}%`,
+                  background: ml.probability >= (ml.threshold ?? 0.4) ? `${T.red}55` : `${T.green}55`,
+                  transition: "width 0.3s" }} />
+                {/* Threshold marker */}
+                <div style={{ position: "absolute", left: `${((ml.threshold ?? 0.4) * 100).toFixed(1)}%`, top: 0,
+                  width: 2, height: "100%", background: T.amber }} />
+                <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center",
+                  justifyContent: "center", height: "100%", fontSize: 9, fontFamily: T.font, color: T.bright }}>
+                  {(ml.probability * 100).toFixed(0)}%
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: T.dim, marginTop: 2 }}>
+                <span>0%</span>
+                <span style={{ color: T.amber }}>▲ threshold {((ml.threshold ?? 0.4) * 100).toFixed(0)}%</span>
+                <span>100%</span>
+              </div>
+            </div>
+          )}
+
+          {ml.target && <div style={{ fontSize: 9, color: T.dim, marginTop: 2 }}>Target: {ml.target}</div>}
+        </div>
+
+        {/* Equity curve */}
+        {mlAligned && (
+          <div style={{ padding: "8px 8px 0" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>EQUITY CURVE</div>
+            <InfoBox>
+              <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
+              <span style={{ color: T.purple }}>Purple</span> = ML Logistic Regression strategy. <span style={{ color: T.dim }}>Grey</span> = S&P 500 buy-and-hold. Growth of $1.
+            </InfoBox>
+            <PerfBox label="ML" perf={mlPerf} bhPerf={bhPerf} />
+            <div style={{ background: T.bgPanel }}>
+              <EquityCurveChart dates={mlAligned.dates} strategy={norm(mlAligned.strategy)} buyHold={norm(mlAligned.buyHold)} height={380} />
+            </div>
+          </div>
+        )}
+
+        {/* Probability chart with threshold line */}
+        {scMl && (
+          <div style={{ padding: "8px 8px 0" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 2 }}>ML PROBABILITY (LAST 2 YEARS)</div>
+            <InfoBox>
+              <span style={{ color: T.purple, fontWeight: 600 }}>How to read: </span>
+              Probability of ≥5% drawdown in 20 trading days. Dashed line = {((ml.threshold ?? 0.4) * 100).toFixed(0)}% threshold.
+            </InfoBox>
+            <div style={{ background: T.bgPanel }}>
+              <MlProbabilityChart dates={scMl.dates} values={scMl.vals} threshold={ml.threshold ?? 0.40} height={220} />
+            </div>
+          </div>
+        )}
+
+        {/* Transaction table */}
+        <div style={{ padding: "8px 8px 12px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, marginBottom: 4 }}>
+            TRANSACTION HISTORY <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>last 2 years</span>
+          </div>
+          <TxnTable rows={txns.ml_logreg} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ML probability chart with threshold dashed line
+function MlProbabilityChart({ dates, values, threshold = 0.40, height = 220 }) {
+  const ref = useRef(null);
+  const [hover, setHover] = useState(null);
+  const [W, setW] = useState(600);
+  const [zoomStart, setZoomStart] = useState(0);
+  const [zoomEnd, setZoomEnd] = useState(dates.length);
+
+  useEffect(() => { setZoomStart(0); setZoomEnd(dates.length); }, [dates.length]);
+  useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver((e) => { const w = e[0].contentRect.width; if (w > 0) setW(w); });
+    ro.observe(ref.current); return () => ro.disconnect();
+  }, []);
+
+  const totalN = dates.length;
+  if (totalN < 2) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
+
+  const zs = Math.max(0, Math.min(zoomStart, totalN - 2));
+  const ze = Math.max(zs + 2, Math.min(zoomEnd, totalN));
+  const zDates = dates.slice(zs, ze);
+  const zVals = values.slice(zs, ze);
+  const n = zDates.length;
+
+  const pad = { l: 52, r: 8, t: 10, b: 20 };
+  const plotH = height - pad.t - pad.b;
+  const xS = makeIndexXScale(n, pad.l, pad.r, W);
+
+  // Fixed 0-1 range
+  const mn = 0, mx = 1, range = 1;
+  const yS = (v) => (v == null || !isFinite(v)) ? null : pad.t + plotH - ((v - mn) / range) * plotH;
+
+  let linePath = "";
+  for (let i = 0; i < n; i++) {
+    const y = yS(zVals[i]);
+    if (y == null) continue;
+    linePath += (linePath ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`;
+  }
+
+  // Area fill
+  let aP = "";
+  const base = yS(0);
+  if (base != null) {
+    let started = false;
+    for (let i = 0; i < n; i++) {
+      const y = yS(zVals[i]);
+      if (y == null) continue;
+      if (!started) { aP = `M${xS(i).toFixed(1)},${base.toFixed(1)}`; started = true; }
+      aP += `L${xS(i).toFixed(1)},${y.toFixed(1)}`;
+    }
+    if (started) aP += `L${xS(n - 1).toFixed(1)},${base.toFixed(1)}Z`;
+  }
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(v => ({ y: yS(v), label: `${(v * 100).toFixed(0)}%` }));
+  const dateLbls = [];
+  const step = Math.max(1, Math.floor(n / 6));
+  for (let i = 0; i < n; i += step) dateLbls.push({ x: xS(i), label: new Date(zDates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+
+  const handleMouse = (e) => {
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    const mouseX = e.clientX - r.left;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < n; i++) { const d = Math.abs(xS(i) - mouseX); if (d < bd) { bd = d; bi = i; } }
+    setHover(bi);
+  };
+  const hx = hover != null ? xS(hover) : null;
+  const threshY = yS(threshold);
+
+  return (
+    <div>
+      <div ref={ref} style={{ position: "relative", width: "100%" }} onMouseMove={handleMouse} onMouseLeave={() => setHover(null)}>
+        <svg width={W} height={height} style={{ display: "block" }}>
+          {yTicks.map((l, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
+          {/* Threshold dashed line */}
+          {threshY != null && <line x1={pad.l} x2={W - pad.r} y1={threshY} y2={threshY}
+            stroke={T.amber} strokeWidth={1} strokeDasharray="6,4" opacity={0.7} />}
+          {threshY != null && <text x={W - pad.r - 2} y={threshY - 4} fill={T.amber} fontSize={8}
+            textAnchor="end" fontFamily={T.font}>THRESHOLD {(threshold * 100).toFixed(0)}%</text>}
+          {aP && <path d={aP} fill={`${T.purple}15`} />}
+          <path d={linePath} fill="none" stroke={T.purple} strokeWidth={1.2} />
+          {yTicks.map((l, i) => <text key={`t${i}`} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
+          {dateLbls.map((l, i) => <text key={`d${i}`} x={l.x} y={height - 4} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
+          {hover != null && <>
+            <line x1={hx} x2={hx} y1={pad.t} y2={height - pad.b} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
+            {yS(zVals[hover]) != null && <circle cx={hx} cy={yS(zVals[hover])} r={2.5} fill={T.purple} stroke={T.bg} strokeWidth={1} />}
+          </>}
+        </svg>
+        {hover != null && zVals[hover] != null && (
+          <div style={{ position: "absolute", left: Math.min(hx + 10, W - 160), top: pad.t,
+            background: "rgba(10,10,12,0.94)", border: `1px solid ${T.borderBright}`,
+            padding: "5px 8px", pointerEvents: "none", zIndex: 10, fontFamily: T.font, fontSize: 9, lineHeight: 1.5 }}>
+            <div style={{ color: T.dim }}>{zDates[hover]}</div>
+            <div style={{ color: T.purple }}>P(drawdown): {(zVals[hover] * 100).toFixed(1)}%</div>
+            <div style={{ color: zVals[hover] >= threshold ? T.red : T.green, fontSize: 8 }}>
+              {zVals[hover] >= threshold ? "RISK-OFF" : "RISK-ON"}
+            </div>
+          </div>
+        )}
+      </div>
+      <ZoomSlider totalLength={totalN} zoomStart={zoomStart} zoomEnd={zoomEnd}
+        onChange={(s, e) => { setZoomStart(s); setZoomEnd(e); }} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Main App
 // ═══════════════════════════════════════════════════════════════
 export default function App() {
@@ -1321,6 +1687,10 @@ export default function App() {
   const [vixyLoading, setVixyLoading] = useState(false);
   const [vixyError, setVixyError] = useState(null);
   const vixyFetched = useRef(false);
+  const [volData, setVolData] = useState(null);
+  const [volLoading, setVolLoading] = useState(false);
+  const [volError, setVolError] = useState(null);
+  const volFetched = useRef(false);
 
   const loadData = useCallback(async () => {
     try { setLoading(true); setError(null); const d = await fetchData(); setData(d); }
@@ -1343,6 +1713,20 @@ export default function App() {
   }, []);
 
   useEffect(() => { if (subTab === "VIXY MODEL") loadVixy(); }, [subTab, loadVixy]);
+
+  const loadVol = useCallback(async () => {
+    if (volFetched.current) return;
+    volFetched.current = true;
+    try {
+      setVolLoading(true); setVolError(null);
+      const res = await fetch("https://raw.githubusercontent.com/smallfishmacro-Git/market-dashboard/main/data/datasets/volatility_signals.json");
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      setVolData(await res.json());
+    } catch (e) { setVolError(e.message); volFetched.current = false; }
+    finally { setVolLoading(false); }
+  }, []);
+
+  useEffect(() => { if (subTab === "VOLATILITY") loadVol(); }, [subTab, loadVol]);
 
   const m = data?.metrics || {};
   const fetchedAt = data?.computedAt;
@@ -1374,7 +1758,7 @@ export default function App() {
             </div>
           )}
         </div>
-        <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL"]} active={subTab} onChange={setSubTab} />
+        <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL", "VOLATILITY"]} active={subTab} onChange={setSubTab} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>{content}</div>
       </div>
       <div style={{ textAlign: "center", padding: "10px 0", borderTop: `1px solid ${T.border}` }}>
@@ -1401,7 +1785,10 @@ export default function App() {
       ? <CompositeSignalView data={data} />
       : subTab === "BACKTEST"
       ? <BacktestView data={data} />
-      : <VixyModelView data={vixyData} loading={vixyLoading} error={vixyError}
+      : subTab === "VIXY MODEL"
+      ? <VixyModelView data={vixyData} loading={vixyLoading} error={vixyError}
           onRetry={() => { vixyFetched.current = false; loadVixy(); }} />
+      : <VolatilityView data={volData} loading={volLoading} error={volError}
+          onRetry={() => { volFetched.current = false; loadVol(); }} />
   );
 }
