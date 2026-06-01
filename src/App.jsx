@@ -259,7 +259,7 @@ function alignIndicatorToDaily(dailyDates, dailySpx, indDates, indTrend) {
 // ═══════════════════════════════════════════════════════════════
 // RegimeChart — SPX line (white) with colored background bands
 // ═══════════════════════════════════════════════════════════════
-function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
+function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420, bandMin = 0, bandMax = 100 }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
   const [W, setW] = useState(700);
@@ -304,28 +304,53 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
   const logMax = Math.log(Math.max(...spxV)) + 0.04;
   const ySpx = (v) => (!v || v <= 0) ? null : pad.t + topH - ((Math.log(v) - logMin) / (logMax - logMin)) * topH;
 
-  // Build background regime bands
+  // ── Background regime bands: COLOR from regime (trend), OPACITY from composite extremity ──
+  const BG_MIN_OP = 0.05;   // composite near neutral midpoint -> barely tinted
+  const BG_MAX_OP = 0.32;   // composite at bandMin/bandMax extreme -> strong wash  (tune these two)
+  const BG_QUANT  = 0.02;   // merge consecutive points sharing this opacity step (keeps rect count low)
+  const bandCenter = (bandMin + bandMax) / 2;
+  const bandHalf   = (bandMax - bandMin) / 2 || 1;
+  const segOpacity = (v) => {
+    let t = (v != null && isFinite(v)) ? Math.abs(v - bandCenter) / bandHalf : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.round((BG_MIN_OP + t * (BG_MAX_OP - BG_MIN_OP)) / BG_QUANT) * BG_QUANT;
+  };
   const buildBands = () => {
-    const bands = [];
+    const out = [];
+    if (n < 1) return out;
     let startIdx = 0;
-    let curRegime = zTrend[0];
+    let curColor = zTrend[0] === 1 ? T.green : T.red;
+    let curOp    = segOpacity(hasInd ? zIndicator[0] : null);
     for (let i = 1; i <= n; i++) {
-      if (i === n || zTrend[i] !== curRegime) {
+      const col = i < n ? (zTrend[i] === 1 ? T.green : T.red) : null;
+      const op  = i < n ? segOpacity(hasInd ? zIndicator[i] : null) : null;
+      if (i === n || col !== curColor || op !== curOp) {
         const x1 = xS(startIdx);
         const x2 = i < n ? xS(i) : xS(n - 1);
-        bands.push({
-          x: x1, width: Math.max(0, x2 - x1),
-          color: curRegime === 1 ? T.green : T.red,
-        });
-        if (i < n) {
-          startIdx = i;
-          curRegime = zTrend[i];
-        }
+        out.push({ x: x1, width: Math.max(0, x2 - x1), color: curColor, opacity: curOp });
+        startIdx = i; curColor = col; curOp = op;
       }
     }
-    return bands;
+    return out;
   };
   const bands = buildBands();
+
+  // ── Last regime change (on the FULL series; drawn only if inside the current zoom window) ──
+  const REG_BUY_COLOR  = "#b6ff2e";   // lime - last signal = BUY
+  const REG_SELL_COLOR = T.red;       // red  - last signal = SELL
+  let lastChgIdx = -1;
+  for (let i = trend.length - 1; i > 0; i--) {
+    if (trend[i] !== trend[i - 1]) { lastChgIdx = i; break; }
+  }
+  const lastRegime   = trend[trend.length - 1];
+  const regLineColor = lastRegime === 1 ? REG_BUY_COLOR : REG_SELL_COLOR;
+  const regLocalIdx  = lastChgIdx - zs;
+  const showRegLine  = lastChgIdx > 0 && regLocalIdx >= 0 && regLocalIdx < n;
+  const regX         = showRegLine ? xS(regLocalIdx) : 0;
+  const regChipX     = Math.max(pad.l, Math.min(regX + 3, W - pad.r - 58));
+  const regDateLabel = showRegLine
+    ? new Date(dates[lastChgIdx]).toLocaleDateString("en-US", { year: "2-digit", month: "short", day: "2-digit" })
+    : "";
 
   // Build single white price line
   let pricePath = "";
@@ -379,10 +404,10 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
       <div ref={ref} style={{ position: "relative", width: "100%" }}
         onMouseMove={handleMouse} onMouseLeave={() => setHover(null)}>
         <svg width={W} height={height} style={{ display: "block" }}>
-          {/* Background regime bands */}
+          {/* Background regime bands — opacity scales with composite extremity */}
           {bands.map((b, i) => (
             <rect key={i} x={b.x} y={pad.t} width={b.width} height={topH}
-              fill={b.color} opacity={0.08} />
+              fill={b.color} opacity={b.opacity} />
           ))}
           {spxTicks.map((l, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={l.y} y2={l.y} stroke="rgba(255,255,255,0.03)" />)}
           {/* White price line */}
@@ -393,6 +418,17 @@ function RegimeChart({ dates, spx, trend, indicator, indLabel, height = 420 }) {
           {spxTicks.map((l, i) => <text key={i} x={pad.l - 4} y={l.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{l.label}</text>)}
           <text x={pad.l + 4} y={pad.t + 12} fill={T.dim} fontSize={8} fontFamily={T.font}>S&P 500 (log)</text>
           {dateLbls.map((l, i) => <text key={i} x={l.x} y={height - 2} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
+          {/* Last regime change marker */}
+          {showRegLine && (
+            <g>
+              <line x1={regX} x2={regX} y1={pad.t} y2={height - pad.b}
+                stroke={regLineColor} strokeWidth={1.2} strokeDasharray="3,3" opacity={0.85} />
+              <rect x={regChipX} y={pad.t + 2} width={56} height={13} rx={2}
+                fill="rgba(10,10,12,0.92)" stroke={regLineColor} strokeWidth={0.6} />
+              <text x={regChipX + 28} y={pad.t + 11} fill={regLineColor}
+                fontSize={8} fontFamily={T.font} textAnchor="middle">{regDateLabel}</text>
+            </g>
+          )}
           {hover != null && <>
             <line x1={hx} x2={hx} y1={pad.t} y2={height - pad.b} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
             {ySpx(zSpx[hover]) != null && <circle cx={hx} cy={ySpx(zSpx[hover])} r={2.5} fill={T.white} stroke={T.bg} strokeWidth={1} />}
@@ -907,7 +943,7 @@ function CompositeSignalView({ data }) {
             This composite captures structural economic regime shifts and rarely changes — ideal for strategic allocation.
           </InfoBox>
           <div style={{ background: T.bgPanel }}>
-            {ltSliced && <RegimeChart dates={ltSliced.dates} spx={ltSliced.arrays[0]} trend={ltSliced.arrays[1]} indicator={ltSliced.arrays[2]} indLabel="Composite Score" height={340} />}
+            {ltSliced && <RegimeChart dates={ltSliced.dates} spx={ltSliced.arrays[0]} trend={ltSliced.arrays[1]} indicator={ltSliced.arrays[2]} indLabel="Composite Score" height={340} bandMin={0} bandMax={3} />}
           </div>
         </div>
 
