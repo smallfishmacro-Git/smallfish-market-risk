@@ -14,11 +14,11 @@ async function fetchData() {
 // Theme — unified terminal design
 // ═══════════════════════════════════════════════════════════════
 const T = {
-  bg: "#0a0a0c", bgPanel: "#0e0e12", bgCard: "#111116",
-  border: "#1c1c24", borderBright: "#2a2a35",
-  text: "#8a8f9a", dim: "#4a4e58", bright: "#e8eaef", white: "#ffffff",
-  cyan: "#00d4ff", orange: "#ff9f43", green: "#00ff88",
-  red: "#ff4757", amber: "#ffbe0b", purple: "#a855f7",
+  bg: "#08090c", bgPanel: "#0d0f14", bgCard: "#08090c",
+  border: "#1a1d26", borderBright: "#2a2d36",
+  text: "#c8cad0", dim: "#5a5e6a", bright: "#e8eaef", white: "#ffffff",
+  cyan: "#00bcd4", orange: "#f0b800", green: "#00c853",
+  red: "#ff5252", amber: "#f0b800", purple: "#a855f7",
   font: "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace",
 };
 
@@ -49,7 +49,7 @@ function sliceByTf(dates, arrays, tf) {
 function InfoBox({ children }) {
   return (
     <div style={{ padding: "6px 10px", margin: "6px 8px", fontSize: 9, lineHeight: 1.6,
-      fontFamily: T.font, color: T.text, background: "rgba(255,159,67,0.04)",
+      fontFamily: T.font, color: T.text, background: "rgba(240,184,0,0.05)",
       border: `1px solid ${T.orange}33` }}>{children}</div>
   );
 }
@@ -119,21 +119,6 @@ function TitleBar({ fetchedAt, onRefresh, refreshing }) {
   );
 }
 
-const NAV_TABS = ["DASHBOARD", "BUY THE DIP", "MARKET RISK", "OVERVIEW", "STRATEGY MAP"];
-function NavBar({ active }) {
-  return (
-    <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.border}`, background: T.bg, padding: "0 16px" }}>
-      {NAV_TABS.map((tab) => {
-        const a = tab === active;
-        return (<div key={tab} style={{ padding: "8px 16px", fontSize: 11, fontWeight: a ? 700 : 400,
-          fontFamily: T.font, color: a ? T.orange : T.dim,
-          borderBottom: a ? `2px solid ${T.orange}` : "2px solid transparent",
-          cursor: "pointer", letterSpacing: 0.8 }}>{tab}</div>);
-      })}
-    </div>
-  );
-}
-
 function SubTabs({ tabs, active, onChange }) {
   return (
     <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.border}` }}>
@@ -155,18 +140,18 @@ function SubTabs({ tabs, active, onChange }) {
 const sliderThumbCss = `
 input[type=range].zoom-slider::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 10px; height: 16px; background: #ff9f43; border: none;
+  width: 10px; height: 16px; background: #f0b800; border: none;
   border-radius: 2px; cursor: pointer; margin-top: -6px;
 }
 input[type=range].zoom-slider::-moz-range-thumb {
-  width: 10px; height: 16px; background: #ff9f43; border: none;
+  width: 10px; height: 16px; background: #f0b800; border: none;
   border-radius: 2px; cursor: pointer;
 }
 input[type=range].zoom-slider::-webkit-slider-runnable-track {
-  height: 4px; background: #1c1c24; border-radius: 2px;
+  height: 4px; background: #1a1d26; border-radius: 2px;
 }
 input[type=range].zoom-slider::-moz-range-track {
-  height: 4px; background: #1c1c24; border-radius: 2px;
+  height: 4px; background: #1a1d26; border-radius: 2px;
 }
 `;
 
@@ -1830,7 +1815,6 @@ export default function App() {
   const shell = (content) => (
     <div style={{ background: T.bg, minHeight: "100vh", color: T.text, fontFamily: T.font, display: "flex", flexDirection: "column" }}>
       <TitleBar fetchedAt={fetchedAt} onRefresh={() => { setRefreshing(true); loadData(); }} refreshing={refreshing} />
-      <NavBar active="MARKET RISK" />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "0 16px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: T.white, letterSpacing: 1 }}>MARKET RISK</span>
