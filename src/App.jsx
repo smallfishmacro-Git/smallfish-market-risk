@@ -48,7 +48,7 @@ function sliceByTf(dates, arrays, tf) {
 // ═══════════════════════════════════════════════════════════════
 function InfoBox({ children }) {
   return (
-    <div style={{ padding: "6px 10px", margin: "0 0 10px", fontSize: 9, lineHeight: 1.6,
+    <div style={{ padding: "6px 10px", margin: "0 0 10px", fontSize: 10, lineHeight: 1.6,
       fontFamily: T.font, color: T.text, background: "rgba(240,184,0,0.05)",
       border: `1px solid ${T.orange}33` }}>{children}</div>
   );
@@ -66,7 +66,7 @@ function PanelHeader({ title, meta, right }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, paddingBottom: 8,
       borderBottom: `1px solid ${T.border}`, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: T.bright, letterSpacing: 1.5 }}>{title}</span>
+      <span style={{ fontSize: 14, fontWeight: 700, color: T.bright, letterSpacing: 2 }}>{title}</span>
       {meta != null && <span style={{ fontSize: 10, color: T.dim, letterSpacing: 0.5 }}>{meta}</span>}
       {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
     </div>
@@ -144,14 +144,14 @@ function TitleBar({ fetchedAt, onRefresh, refreshing }) {
 
 function SubTabs({ tabs, active, onChange }) {
   return (
-    <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.border}` }}>
+    <div style={{ display: "flex", gap: 0 }}>
       {tabs.map((tab) => {
         const a = tab === active;
         return (<div key={tab} onClick={() => onChange(tab)} style={{
-          padding: "6px 18px", fontSize: 10, fontWeight: a ? 600 : 400,
-          fontFamily: T.font, letterSpacing: 1, cursor: "pointer",
-          color: a ? T.bright : T.dim, borderBottom: a ? `2px solid ${T.orange}` : "2px solid transparent",
-          marginBottom: -1 }}>{tab}</div>);
+          padding: "5px 16px", fontSize: 10, fontWeight: 400,
+          fontFamily: T.font, letterSpacing: 1, cursor: "pointer", transition: "all 0.15s",
+          color: a ? T.text : T.dim,
+          borderBottom: a ? `1px solid ${T.orange}` : "1px solid transparent" }}>{tab}</div>);
       })}
     </div>
   );
@@ -1822,10 +1822,11 @@ export default function App() {
     <div style={{ background: T.bg, minHeight: "100vh", color: T.text, fontFamily: T.font, display: "flex", flexDirection: "column" }}>
       <TitleBar fetchedAt={fetchedAt} onRefresh={() => { setRefreshing(true); loadData(); }} refreshing={refreshing} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "0 16px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
-          <span style={{ fontSize: 16, fontWeight: 700, color: T.white, letterSpacing: 1 }}>MARKET RISK</span>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between",
+          borderBottom: `1px solid ${T.border}`, padding: "6px 0 0", marginBottom: 12 }}>
+          <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL", "VOLATILITY"]} active={subTab} onChange={setSubTab} />
           {data && (
-            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 2, paddingBottom: 5 }}>
               <div style={{ padding: "3px 10px", fontSize: 10, fontFamily: T.font,
                 background: `${thmColor}18`, border: `1px solid ${thmColor}44`,
                 color: thmColor, fontWeight: 700, letterSpacing: 0.5 }}>
@@ -1843,7 +1844,6 @@ export default function App() {
             </div>
           )}
         </div>
-        <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL", "VOLATILITY"]} active={subTab} onChange={setSubTab} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>{content}</div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
