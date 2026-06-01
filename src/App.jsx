@@ -793,6 +793,51 @@ function SimpleChart({ dates, values, color = T.orange, label = "", yFormat = (v
   );
 }
 
+function RegimeDualChart({ dates, a, b, dualAxis = false, height = 230 }) {
+  const ref = useRef(null); const [W, setW] = useState(600); const [hover, setHover] = useState(null);
+  useEffect(() => { if (!ref.current) return; const ro = new ResizeObserver((e) => { const w = e[0].contentRect.width; if (w > 0) setW(w); }); ro.observe(ref.current); return () => ro.disconnect(); }, []);
+  const n = dates.length;
+  if (n < 2) return <div style={{ color: T.dim, padding: 16, fontSize: 10 }}>NO DATA</div>;
+  const pad = { l: 46, r: dualAxis ? 48 : 36, t: 10, b: 20 };
+  const plotH = height - pad.t - pad.b;
+  const xS = makeIndexXScale(n, pad.l, pad.r, W);
+  const scaleFor = (vals) => { const v = vals.filter(x => x != null && isFinite(x)); const mn = Math.min(...v), mx = Math.max(...v); const r = (mx - mn) || 1; const lo = mn - r * 0.08, hi = mx + r * 0.08; const rr = hi - lo || 1; return (x) => (x == null || !isFinite(x)) ? null : pad.t + plotH - ((x - lo) / rr) * plotH; };
+  const yA = scaleFor(a.values); const yB = dualAxis ? scaleFor(b.values) : yA;
+  const path = (vals, yS) => { let p = ""; for (let i = 0; i < n; i++) { const y = yS(vals[i]); if (y == null) continue; p += (p ? "L" : "M") + `${xS(i).toFixed(1)},${y.toFixed(1)}`; } return p; };
+  const area = (vals, yS) => { let p = "", st = false; const base = pad.t + plotH; for (let i = 0; i < n; i++) { const y = yS(vals[i]); if (y == null) continue; if (!st) { p = `M${xS(i).toFixed(1)},${base}`; st = true; } p += `L${xS(i).toFixed(1)},${y.toFixed(1)}`; } if (st) p += `L${xS(n - 1).toFixed(1)},${base}Z`; return p; };
+  const ticksFor = (vals, yS) => { const v = vals.filter(x => x != null && isFinite(x)); const mn = Math.min(...v), mx = Math.max(...v); return [mn, (mn + mx) / 2, mx].map(t => ({ y: yS(t), v: t })); };
+  const aTicks = ticksFor(a.values, yA), bTicks = dualAxis ? ticksFor(b.values, yB) : null;
+  const dlbl = []; const step = Math.max(1, Math.floor(n / 6));
+  for (let i = 0; i < n; i += step) dlbl.push({ x: xS(i), label: new Date(dates[i]).toLocaleDateString("en-US", { year: "2-digit", month: "short" }) });
+  const onMove = (e) => { const r = ref.current?.getBoundingClientRect(); if (!r) return; const mx = e.clientX - r.left; let bi = 0, bd = Infinity; for (let i = 0; i < n; i++) { const d = Math.abs(xS(i) - mx); if (d < bd) { bd = d; bi = i; } } setHover(bi); };
+  const hx = hover != null ? xS(hover) : null;
+  return (
+    <div ref={ref} style={{ position: "relative", width: "100%" }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <svg width={W} height={height} style={{ display: "block" }}>
+        {aTicks.map((t, i) => <line key={i} x1={pad.l} x2={W - pad.r} y1={t.y} y2={t.y} stroke="rgba(255,255,255,0.03)" />)}
+        {a.fill && <path d={area(a.values, yA)} fill={`${a.color}18`} />}
+        <path d={path(b.values, yB)} fill="none" stroke={b.color} strokeWidth={1.1} />
+        <path d={path(a.values, yA)} fill="none" stroke={a.color} strokeWidth={1.3} />
+        {aTicks.map((t, i) => <text key={`a${i}`} x={pad.l - 4} y={t.y + 3} fill={T.dim} fontSize={8} textAnchor="end" fontFamily={T.font}>{a.fmt(t.v)}</text>)}
+        {dualAxis && bTicks.map((t, i) => <text key={`b${i}`} x={W - pad.r + 4} y={t.y + 3} fill={T.dim} fontSize={8} textAnchor="start" fontFamily={T.font}>{b.fmt(t.v)}</text>)}
+        {dlbl.map((l, i) => <text key={`d${i}`} x={l.x} y={height - 4} fill={T.dim} fontSize={8} textAnchor="middle" fontFamily={T.font}>{l.label}</text>)}
+        {hover != null && <>
+          <line x1={hx} x2={hx} y1={pad.t} y2={pad.t + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
+          {yA(a.values[hover]) != null && <circle cx={hx} cy={yA(a.values[hover])} r={2.3} fill={a.color} stroke={T.bg} strokeWidth={1} />}
+          {yB(b.values[hover]) != null && <circle cx={hx} cy={yB(b.values[hover])} r={2.3} fill={b.color} stroke={T.bg} strokeWidth={1} />}
+        </>}
+      </svg>
+      {hover != null && (
+        <div style={{ position: "absolute", left: Math.min(hx + 10, W - 150), top: pad.t, background: "rgba(8,9,12,0.94)", border: `1px solid ${T.borderBright}`, padding: "5px 8px", pointerEvents: "none", zIndex: 10, fontFamily: T.font, fontSize: 9, lineHeight: 1.5 }}>
+          <div style={{ color: T.dim }}>{dates[hover]}</div>
+          <div style={{ color: a.color }}>{a.label}: {a.fmt(a.values[hover])}</div>
+          <div style={{ color: b.color }}>{b.label}: {b.fmt(b.values[hover])}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Backtest computation
 // ═══════════════════════════════════════════════════════════════
@@ -1395,6 +1440,106 @@ function normTo100(arr) { const b = arr[0] || 1; return arr.map(v => v / b * 100
 
 const volSignalColor = (sig) => sig === "RISK-ON" ? T.green : T.red;
 
+const REGIME_META = {
+  REFLATION:   { color: T.orange, label: "REFLATION" },
+  GOLDILOCKS:  { color: T.green,  label: "GOLDILOCKS" },
+  STAGFLATION: { color: T.red,    label: "STAGFLATION" },
+  DEFLATION:   { color: T.cyan,   label: "DEFLATION" },
+};
+function rrClassify(gz, iz) { if (gz >= 0 && iz >= 0) return "REFLATION"; if (gz >= 0 && iz < 0) return "GOLDILOCKS"; if (gz < 0 && iz >= 0) return "STAGFLATION"; return "DEFLATION"; }
+function rrIntensity(gz, iz) { const m = Math.sqrt(gz*gz + iz*iz); return m >= 2 ? "STRONG" : m >= 1 ? "MODERATE" : "MILD"; }
+function rrPct(arr, v) { const a = arr.filter(x => x != null && isFinite(x)); if (!a.length || v == null) return null; let c = 0; for (const x of a) if (x <= v) c++; return Math.round(100*c/a.length); }
+function computeRiskRegime(S, lookback = 60, refWindow = 504) {
+  const n = S.dates.length; const gd = Array(n).fill(null), id = Array(n).fill(null);
+  for (let i = lookback; i < n; i++) { if (S.real5[i] != null && S.real5[i-lookback] != null) gd[i] = S.real5[i] - S.real5[i-lookback]; if (S.be10[i] != null && S.be10[i-lookback] != null) id[i] = S.be10[i] - S.be10[i-lookback]; }
+  const z = (s, i) => { const w = []; for (let j = Math.max(0, i-refWindow+1); j <= i; j++) if (s[j] != null && isFinite(s[j])) w.push(s[j]); if (w.length < 20) return null; const m = w.reduce((a,b)=>a+b,0)/w.length; const sd = Math.sqrt(w.reduce((a,b)=>a+(b-m)*(b-m),0)/w.length) || 1e-9; return (s[i]-m)/sd; };
+  const gz = Array(n).fill(null), iz = Array(n).fill(null), reg = Array(n).fill(null);
+  for (let i = 0; i < n; i++) { gz[i] = gd[i] != null ? z(gd, i) : null; iz[i] = id[i] != null ? z(id, i) : null; if (gz[i] != null && iz[i] != null) reg[i] = rrClassify(gz[i], iz[i]); }
+  const runs = []; for (let i = 0; i < n; i++) { if (reg[i] == null) continue; const last = runs[runs.length-1]; if (last && last.r === reg[i]) last.end = i; else runs.push({ r: reg[i], start: i, end: i }); }
+  const lens = runs.map(r => r.end - r.start + 1);
+  const avgRun = lens.length ? Math.round(lens.reduce((a,b)=>a+b,0)/lens.length) : 0;
+  const curRun = lens.length ? lens[lens.length-1] : 0;
+  const trans = {}; for (let k = 0; k < runs.length-1; k++) { const a = runs[k].r, b = runs[k+1].r; (trans[a] = trans[a] || {})[b] = (trans[a][b] || 0) + 1; }
+  const cur = reg[n-1]; let nextLikely = null;
+  if (cur && trans[cur]) { const e = Object.entries(trans[cur]); const tot = e.reduce((a,[,c])=>a+c,0); e.sort((a,b)=>b[1]-a[1]); nextLikely = { regime: e[0][0], prob: Math.round(100*e[0][1]/tot), n: tot }; }
+  const L = n - 1;
+  return { regimeSeries: reg, growthZ: gz, inflZ: iz, runs, curRun, avgRun, extended: curRun > avgRun, nextLikely,
+    latest: { regime: cur, intensity: cur ? rrIntensity(gz[L], iz[L]) : null, growthZ: gz[L], inflZ: iz[L], real5: S.real5[L], be10: S.be10[L], be5: S.be5[L], fwd5y5y: S.fwd5y5y[L], hyOas: S.hy_oas[L], igOas: S.ig_oas[L], beSlope: (S.be5[L] != null && S.be10[L] != null) ? S.be5[L] - S.be10[L] : null, hyPctile: rrPct(S.hy_oas.slice(Math.max(0, L-refWindow+1), L+1), S.hy_oas[L]), igPctile: rrPct(S.ig_oas.slice(Math.max(0, L-refWindow+1), L+1), S.ig_oas[L]) } };
+}
+
+function RiskRegimeView({ data, loading, error, onRetry }) {
+  const [lookback, setLookback] = useState(60);
+  const [inputLb, setInputLb] = useState("60");
+  const R = useMemo(() => (data ? computeRiskRegime(data, lookback) : null), [data, lookback]);
+  if (loading) return <div style={{ color: T.dim, padding: 24, fontSize: 11 }}>Loading risk regime…</div>;
+  if (error) return <div style={{ color: T.red, padding: 24, fontSize: 11 }}>Error: {error} <button onClick={onRetry} style={{ marginLeft: 8, padding: "3px 10px", background: "transparent", color: T.dim, border: `1px solid ${T.border}`, cursor: "pointer", fontFamily: T.font }}>Retry</button></div>;
+  if (!data || !R) return <div style={{ color: T.dim, padding: 24, fontSize: 11 }}>No data</div>;
+  const Ln = data.dates.length; const win = Math.min(Ln, 520); const s = Ln - win;
+  const slc = (arr) => arr.slice(s); const dts = data.dates.slice(s);
+  const lt = R.latest; const meta = REGIME_META[lt.regime] || { color: T.dim, label: "—" };
+  const f2 = (v) => v == null ? "—" : v.toFixed(2); const sgn = (v) => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(2);
+  const applyLb = () => { const v = parseInt(inputLb, 10); if (v >= 5 && v <= 252) setLookback(v); };
+  const drow = (k, v, c) => (<div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, padding: "2px 0", color: T.dim }}><span>{k}</span><span style={{ color: c || T.text }}>{v}</span></div>);
+  return (
+    <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0, padding: "0 0 16px" }}>
+      <div style={{ flex: "1.4 1 0", minWidth: 0, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+        <Panel style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 9, color: T.dim, letterSpacing: 1 }}>LOOKBACK (DAYS)</span>
+          <input value={inputLb} onChange={(e) => setInputLb(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyLb()} style={{ width: 54, background: T.bgCard, border: `1px solid ${T.border}`, color: T.text, padding: "3px 6px", fontSize: 10, fontFamily: T.font, textAlign: "center" }} />
+          <button onClick={applyLb} style={{ padding: "3px 12px", fontSize: 10, fontFamily: T.font, cursor: "pointer", background: T.orange, color: "#000", border: `1px solid ${T.orange}`, fontWeight: 700 }}>GO</button>
+          <button onClick={() => { setInputLb("60"); setLookback(60); }} style={{ padding: "3px 12px", fontSize: 10, fontFamily: T.font, cursor: "pointer", background: "transparent", color: T.dim, border: `1px solid ${T.border}` }}>RESET</button>
+          <div style={{ marginLeft: "auto", padding: "3px 12px", fontSize: 11, fontWeight: 700, letterSpacing: 1, background: `${meta.color}18`, border: `1px solid ${meta.color}55`, color: meta.color }}>{lt.intensity} {meta.label}</div>
+        </Panel>
+        <Panel>
+          <PanelHeader title="BREAKEVEN INFLATION" meta="5Y vs 10Y" />
+          <div style={{ background: T.bgCard, borderRadius: 3, padding: "4px 0" }}>
+            <RegimeDualChart dates={dts} height={240} a={{ values: slc(data.be5), color: T.orange, label: "5Y BE", fmt: (v) => v.toFixed(2) + "%", fill: true }} b={{ values: slc(data.be10), color: T.white, label: "10Y BE", fmt: (v) => v.toFixed(2) + "%", fill: false }} />
+          </div>
+        </Panel>
+        <Panel>
+          <PanelHeader title="CREDIT SPREADS" meta="HY vs IG OAS" />
+          <div style={{ background: T.bgCard, borderRadius: 3, padding: "4px 0" }}>
+            <RegimeDualChart dates={dts} height={240} dualAxis a={{ values: slc(data.hy_oas), color: T.white, label: "HY OAS", fmt: (v) => Math.round(v) + " bps", fill: false }} b={{ values: slc(data.ig_oas), color: T.orange, label: "IG OAS", fmt: (v) => Math.round(v) + " bps", fill: false }} />
+          </div>
+        </Panel>
+      </div>
+      <div style={{ flex: "0.7 1 0", minWidth: 0, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+        <Panel>
+          <PanelHeader title="REGIME" />
+          {Object.keys(REGIME_META).map((k) => { const active = k === lt.regime; const c = REGIME_META[k].color; return (
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", opacity: active ? 1 : 0.45 }}>
+              <div style={{ width: 9, height: 9, background: c, borderRadius: 1 }} />
+              <span style={{ fontSize: 11, color: active ? c : T.text, fontWeight: active ? 700 : 400, letterSpacing: 0.5 }}>{REGIME_META[k].label}</span>
+              {active && <span style={{ marginLeft: "auto", fontSize: 9, color: c }}>● ACTIVE</span>}
+            </div>); })}
+        </Panel>
+        <Panel>
+          <PanelHeader title="SERIES (LATEST)" />
+          {[["HY OAS", Math.round(lt.hyOas) + " bps", T.white], ["IG OAS", Math.round(lt.igOas) + " bps", T.orange], ["5Y BE", f2(lt.be5) + "%", T.orange], ["10Y BE", f2(lt.be10) + "%", T.white]].map(([k, v, c]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "3px 0", color: T.dim }}><span>{k}</span><span style={{ color: c }}>{v}</span></div>))}
+        </Panel>
+        <Panel>
+          <PanelHeader title="DIAGNOSTICS" />
+          {drow(`Lookback: ${lookback}d · Ref: 504d`, "")}
+          {drow("Δ growth z (5y real)", sgn(lt.growthZ) + "σ", lt.growthZ >= 0 ? T.green : T.red)}
+          {drow("Δ infl z (10y BE)", sgn(lt.inflZ) + "σ", lt.inflZ >= 0 ? T.green : T.red)}
+          {drow("Intensity", lt.intensity, meta.color)}
+          <div style={{ height: 6 }} />
+          {drow("5y real yield", f2(lt.real5) + "%")}
+          {drow("10y BE", f2(lt.be10) + "%")}
+          {drow("5y5y fwd inflation", f2(lt.fwd5y5y) + "%")}
+          {drow("BE slope (5y-10y)", sgn(lt.beSlope) + "%")}
+          {drow("HY OAS", lt.hyPctile + "th pctile", T.green)}
+          {drow("IG OAS", lt.igPctile + "th pctile", T.green)}
+          <div style={{ height: 6 }} />
+          {drow(`Day ${R.curRun} of ${R.avgRun} avg`, R.extended ? "EXTENDED" : "EARLY", R.extended ? T.orange : T.dim)}
+          {R.nextLikely && drow("Next likely", `${R.nextLikely.regime} (${R.nextLikely.prob}%, n=${R.nextLikely.n})`, REGIME_META[R.nextLikely.regime]?.color)}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
 function VolatilityView({ data, loading, error, onRetry }) {
   const [p3EqTf, setP3EqTf] = useState("ALL");
   const [p3SigTf, setP3SigTf] = useState("ALL");
@@ -1773,10 +1918,10 @@ export default function App() {
   const [vixyLoading, setVixyLoading] = useState(false);
   const [vixyError, setVixyError] = useState(null);
   const vixyFetched = useRef(false);
-  const [volData, setVolData] = useState(null);
-  const [volLoading, setVolLoading] = useState(false);
-  const [volError, setVolError] = useState(null);
-  const volFetched = useRef(false);
+  const [riskData, setRiskData] = useState(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [riskError, setRiskError] = useState(null);
+  const riskFetched = useRef(false);
 
   const loadData = useCallback(async () => {
     try { setLoading(true); setError(null); const d = await fetchData(); setData(d); }
@@ -1800,19 +1945,19 @@ export default function App() {
 
   useEffect(() => { if (subTab === "VIXY MODEL") loadVixy(); }, [subTab, loadVixy]);
 
-  const loadVol = useCallback(async () => {
-    if (volFetched.current) return;
-    volFetched.current = true;
+  const loadRisk = useCallback(async () => {
+    if (riskFetched.current) return;
+    riskFetched.current = true;
     try {
-      setVolLoading(true); setVolError(null);
-      const res = await fetch("https://raw.githubusercontent.com/smallfishmacro-Git/market-dashboard/main/data/datasets/volatility_signals.json");
+      setRiskLoading(true); setRiskError(null);
+      const res = await fetch("https://raw.githubusercontent.com/smallfishmacro-Git/market-dashboard/main/data/datasets/risk_regime.json");
       if (!res.ok) throw new Error(`API ${res.status}`);
-      setVolData(await res.json());
-    } catch (e) { setVolError(e.message); }
-    finally { setVolLoading(false); }
+      setRiskData(await res.json());
+    } catch (e) { setRiskError(e.message); riskFetched.current = false; }
+    finally { setRiskLoading(false); }
   }, []);
 
-  useEffect(() => { if (subTab === "VOLATILITY") loadVol(); }, [subTab, loadVol]);
+  useEffect(() => { if (subTab === "RISK REGIME") loadRisk(); }, [subTab, loadRisk]);
 
   const m = data?.metrics || {};
   const fetchedAt = data?.computedAt;
@@ -1824,7 +1969,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "0 16px" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between",
           borderBottom: `1px solid ${T.border}`, padding: "6px 0 0", marginBottom: 12 }}>
-          <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL", "VOLATILITY"]} active={subTab} onChange={setSubTab} />
+          <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL", "RISK REGIME"]} active={subTab} onChange={setSubTab} />
           {data && (
             <div style={{ display: "flex", alignItems: "center", gap: 2, paddingBottom: 5 }}>
               <div style={{ padding: "3px 10px", fontSize: 10, fontFamily: T.font,
@@ -1883,7 +2028,7 @@ export default function App() {
       : subTab === "VIXY MODEL"
       ? <VixyModelView data={vixyData} loading={vixyLoading} error={vixyError}
           onRetry={() => { vixyFetched.current = false; loadVixy(); }} />
-      : <VolatilityView data={volData} loading={volLoading} error={volError}
-          onRetry={() => { volFetched.current = false; loadVol(); }} />
+      : <RiskRegimeView data={riskData} loading={riskLoading} error={riskError}
+          onRetry={() => { riskFetched.current = false; loadRisk(); }} />
   );
 }
