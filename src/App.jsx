@@ -48,9 +48,28 @@ function sliceByTf(dates, arrays, tf) {
 // ═══════════════════════════════════════════════════════════════
 function InfoBox({ children }) {
   return (
-    <div style={{ padding: "6px 10px", margin: "6px 8px", fontSize: 9, lineHeight: 1.6,
+    <div style={{ padding: "6px 10px", margin: "0 0 10px", fontSize: 9, lineHeight: 1.6,
       fontFamily: T.font, color: T.text, background: "rgba(240,184,0,0.05)",
       border: `1px solid ${T.orange}33` }}>{children}</div>
+  );
+}
+
+function Panel({ children, style }) {
+  return (
+    <div style={{ background: T.bgPanel, border: `1px solid ${T.border}`, borderRadius: 4, padding: 14, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function PanelHeader({ title, meta, right }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, paddingBottom: 8,
+      borderBottom: `1px solid ${T.border}`, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: T.bright, letterSpacing: 1.5 }}>{title}</span>
+      {meta != null && <span style={{ fontSize: 10, color: T.dim, letterSpacing: 0.5 }}>{meta}</span>}
+      {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
+    </div>
   );
 }
 
@@ -890,77 +909,60 @@ function CompositeSignalView({ data }) {
   const thmInds = data?.indicators?.filter((i) => i.group === "thm") || [];
 
   return (
-    <>
-      {/* Main 2-column layout */}
-      <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
-        {/* LEFT: Charts */}
-        <div style={{ flex: "1 1 55%", minWidth: 0, borderRight: `1px solid ${T.border}`, overflow: "auto" }}>
-          {/* THM Chart */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 8px 0" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>
-              TREND HEALTH MODEL
-              <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>
-                {m.thmScore}% — <span style={{ color: m.thmBull ? T.green : T.red }}>{m.thmBull ? "BULL" : "BEAR"}</span>
-              </span>
-            </div>
-            <TimeframeBar value={thmTf} onChange={setThmTf} />
-          </div>
+    <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0, padding: "0 0 16px" }}>
+      {/* LEFT: stacked chart panels */}
+      <div style={{ flex: "1.1 1 0", minWidth: 0, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+        <Panel>
+          <PanelHeader
+            title="TREND HEALTH MODEL"
+            meta={<>{m.thmScore}% — <span style={{ color: m.thmBull ? T.green : T.red }}>{m.thmBull ? "BULL" : "BEAR"}</span></>}
+            right={<TimeframeBar value={thmTf} onChange={setThmTf} />}
+          />
           <InfoBox>
             <span style={{ color: T.orange, fontWeight: 600 }}>How to read this: </span>
             The Trend Health Model aggregates 20 indicators across macro, breadth, volatility, momentum, and sentiment.
             The composite score (0–100%) reflects the percentage of indicators in a bullish state.
             Above 55% = <span style={{ color: T.green }}>BULL</span> regime (green background). Below = <span style={{ color: T.red }}>BEAR</span> regime (red background).
           </InfoBox>
-          <div style={{ background: T.bgPanel }}>
+          <div style={{ background: T.bgCard, borderRadius: 3 }}>
             {thmSliced && <RegimeChart dates={thmSliced.dates} spx={thmSliced.arrays[0]} trend={thmSliced.arrays[1]} indicator={thmSliced.arrays[2]} indLabel="Health Score %" height={380} />}
           </div>
+        </Panel>
 
-          {/* LT Chart */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 8px 0" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8 }}>
-              LONG TERM COMPOSITE
-              <span style={{ fontWeight: 400, color: T.dim, fontSize: 9, marginLeft: 8 }}>
-                {m.ltScore}/{m.ltTotal} — <span style={{ color: m.ltBull ? T.green : T.red }}>{m.ltBull ? "BULL" : "BEAR"}</span>
-              </span>
-            </div>
-            <TimeframeBar value={ltTf} onChange={setLtTf} />
-          </div>
+        <Panel>
+          <PanelHeader
+            title="LONG TERM COMPOSITE"
+            meta={<>{m.ltScore}/{m.ltTotal} — <span style={{ color: m.ltBull ? T.green : T.red }}>{m.ltBull ? "BULL" : "BEAR"}</span></>}
+            right={<TimeframeBar value={ltTf} onChange={setLtTf} />}
+          />
           <InfoBox>
             <span style={{ color: T.orange, fontWeight: 600 }}>How to read this: </span>
             The Long Term Composite tracks 3 slow-moving macro indicators: OECD CLI, Nasdaq 100 Hi-Lo breadth, and credit spreads.
             When ≥2 out of 3 are bullish, the model signals <span style={{ color: T.green }}>BULL</span>.
             This composite captures structural economic regime shifts and rarely changes — ideal for strategic allocation.
           </InfoBox>
-          <div style={{ background: T.bgPanel }}>
+          <div style={{ background: T.bgCard, borderRadius: 3 }}>
             {ltSliced && <RegimeChart dates={ltSliced.dates} spx={ltSliced.arrays[0]} trend={ltSliced.arrays[1]} indicator={ltSliced.arrays[2]} indLabel="Composite Score" height={340} bandMin={0} bandMax={3} />}
           </div>
-        </div>
+        </Panel>
+      </div>
 
-        {/* RIGHT: Indicator tables */}
-        <div style={{ flex: "1 1 45%", minWidth: 0, overflow: "auto" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: T.white, letterSpacing: 0.8, padding: "8px 8px 0",
-            display: "flex", justifyContent: "space-between" }}>
-            <span>INDICATORS</span>
-            <span style={{ fontWeight: 400, color: T.dim, fontSize: 9 }}>
-              {m.bullishCount}/{m.totalCount} bullish · Click to expand
-            </span>
-          </div>
+      {/* RIGHT: indicators panel */}
+      <div style={{ flex: "0.9 1 0", minWidth: 0, minHeight: 0, overflow: "auto" }}>
+        <Panel style={{ padding: "14px 12px" }}>
+          <PanelHeader title="INDICATORS" meta={`${m.bullishCount}/${m.totalCount} bullish · Click to expand`} />
           <InfoBox>
             <span style={{ color: T.orange, fontWeight: 600 }}>Reading the table: </span>
             Each indicator outputs a binary signal: <span style={{ color: T.green, fontWeight: 600 }}>LONG</span> (bullish — risk on) or <span style={{ color: T.red, fontWeight: 600 }}>SHORT</span> (bearish — risk off).
             The date shows the last regime change. Expand any row to see SPX colored by the indicator's bull/bear periods.
           </InfoBox>
-
-          {/* LT indicators */}
-          <div style={{ padding: "6px 8px 2px", fontSize: 9, color: T.orange, fontWeight: 600, letterSpacing: 0.8 }}>LONG TERM</div>
+          <div style={{ padding: "6px 2px 2px", fontSize: 9, color: T.orange, fontWeight: 600, letterSpacing: 0.8 }}>LONG TERM</div>
           {ltInds.map((ind, i) => <IndicatorRow key={ind.col} ind={ind} index={i + 1} dailyDates={data?.lt?.dates} dailySpx={data?.lt?.spx} />)}
-
-          {/* THM indicators */}
-          <div style={{ padding: "10px 8px 2px", fontSize: 9, color: T.orange, fontWeight: 600, letterSpacing: 0.8 }}>HEALTH MODEL</div>
+          <div style={{ padding: "10px 2px 2px", fontSize: 9, color: T.orange, fontWeight: 600, letterSpacing: 0.8 }}>HEALTH MODEL</div>
           {thmInds.map((ind, i) => <IndicatorRow key={ind.col} ind={ind} index={i + 4} dailyDates={data?.thm?.dates} dailySpx={data?.thm?.spx} />)}
-        </div>
+        </Panel>
       </div>
-    </>
+    </div>
   );
 }
 
