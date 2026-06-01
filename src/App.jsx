@@ -102,11 +102,15 @@ function StatCell({ label, value, color }) {
 function TitleBar({ fetchedAt, onRefresh, refreshing }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "8px 16px", background: T.bg, borderBottom: `1px solid ${T.border}` }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontSize: 16, fontWeight: 700, color: T.orange, fontFamily: T.font, letterSpacing: 2 }}>SMALLFISHMACRO</span>
-        <span style={{ fontSize: 12, color: T.dim, fontFamily: T.font, letterSpacing: 1 }}>TERMINAL</span>
-        <span style={{ fontSize: 10, color: T.dim, fontFamily: T.font }}>v1.0</span>
+      padding: "10px 16px", background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 22, height: 22, border: `1.5px solid ${T.orange}`, borderRadius: "50%",
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: T.orange, fontWeight: 700 }}>S</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: "bold", letterSpacing: 3, color: T.orange, fontFamily: T.font }}>SMALLFISHMACRO</span>
+          <span style={{ fontSize: 12, letterSpacing: 2, color: T.bright, fontWeight: "bold", fontFamily: T.font }}>TERMINAL</span>
+          <span style={{ fontSize: 10, color: T.dim, fontFamily: T.font }}>v1.0</span>
+        </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 9, fontFamily: T.font, color: T.dim }}>
         <span>{fetchedAt ? new Date(fetchedAt).toLocaleString() : ""}</span>
@@ -125,9 +129,9 @@ function SubTabs({ tabs, active, onChange }) {
       {tabs.map((tab) => {
         const a = tab === active;
         return (<div key={tab} onClick={() => onChange(tab)} style={{
-          padding: "8px 18px", fontSize: 11, fontWeight: a ? 600 : 400,
-          fontFamily: T.font, letterSpacing: 0.8, cursor: "pointer",
-          color: a ? T.white : T.dim, borderBottom: a ? `2px solid ${T.white}` : "2px solid transparent",
+          padding: "6px 18px", fontSize: 10, fontWeight: a ? 600 : 400,
+          fontFamily: T.font, letterSpacing: 1, cursor: "pointer",
+          color: a ? T.bright : T.dim, borderBottom: a ? `2px solid ${T.orange}` : "2px solid transparent",
           marginBottom: -1 }}>{tab}</div>);
       })}
     </div>
@@ -1840,10 +1844,20 @@ export default function App() {
         <SubTabs tabs={["COMPOSITE SIGNAL", "BACKTEST", "VIXY MODEL", "VOLATILITY"]} active={subTab} onChange={setSubTab} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>{content}</div>
       </div>
-      <div style={{ textAlign: "center", padding: "10px 0", borderTop: `1px solid ${T.border}` }}>
-        <span style={{ color: T.dim, fontSize: 8, letterSpacing: 1, fontFamily: T.font }}>
-          SMALLFISHMACRO · BARCHART · FRED · YFINANCE · GITHUB ACTIONS · VERCEL EDGE
-        </span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+        margin: "12px 16px 0", padding: "8px 0", borderTop: `1px solid ${T.border}`, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 9, color: T.dim, flexWrap: "wrap" }}>
+          <span>DATA: <span style={{ color: T.green }}>● BARCHART · FRED · YFINANCE</span></span>
+          <span>|</span>
+          <span>UPDATED: {fetchedAt ? new Date(fetchedAt).toLocaleString() : "—"}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 9, color: T.dim }}>
+          <a href="https://smallfish-btd.vercel.app/" target="_blank" rel="noopener noreferrer" style={{ color: T.dim, textDecoration: "none" }}>BTD</a>
+          <span style={{ color: T.orange }}>MKT RISK</span>
+          <a href="https://smallfish-rates.vercel.app/" target="_blank" rel="noopener noreferrer" style={{ color: T.dim, textDecoration: "none" }}>RATES</a>
+          <span>|</span>
+          <span style={{ color: T.orange, letterSpacing: 1 }}>SMALLFISHMACRO TERMINAL v1.0</span>
+        </div>
       </div>
     </div>
   );
