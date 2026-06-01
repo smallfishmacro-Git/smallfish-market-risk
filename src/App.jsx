@@ -882,7 +882,7 @@ function CompositeSignalView({ data }) {
           </div>
           <InfoBox>
             <span style={{ color: T.orange, fontWeight: 600 }}>How to read this: </span>
-            The Trend Health Model aggregates 18 indicators across macro, breadth, volatility, momentum, and sentiment.
+            The Trend Health Model aggregates 20 indicators across macro, breadth, volatility, momentum, and sentiment.
             The composite score (0–100%) reflects the percentage of indicators in a bullish state.
             Above 55% = <span style={{ color: T.green }}>BULL</span> regime (green background). Below = <span style={{ color: T.red }}>BEAR</span> regime (red background).
           </InfoBox>
