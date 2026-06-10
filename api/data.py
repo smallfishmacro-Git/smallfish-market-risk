@@ -32,7 +32,7 @@ class handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header(
                 "Cache-Control",
-                "s-maxage=3600, stale-while-revalidate=86400"
+                "s-maxage=300, stale-while-revalidate=86400"
             )
             self.end_headers()
             self.wfile.write(payload)
