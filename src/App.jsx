@@ -1936,7 +1936,7 @@ export default function App() {
     vixyFetched.current = true;
     try {
       setVixyLoading(true); setVixyError(null);
-      const res = await fetch("/api/vixy");
+      const res = await fetch("https://raw.githubusercontent.com/smallfishmacro-Git/market-dashboard/main/data/datasets/vixy.json");
       if (!res.ok) throw new Error(`API ${res.status}`);
       setVixyData(await res.json());
     } catch (e) { setVixyError(e.message); vixyFetched.current = false; }
